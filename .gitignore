@@ -8,4 +8,4 @@ raw_data
 
 *.ts
 *.zip
-./__pycache__
+./__pycache__.env

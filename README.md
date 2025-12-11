@@ -7,16 +7,15 @@ SPDX-License-Identifier: MIT
 -->
 
 # OpenTSLM: Time-Series Language Models for Reasoning over Multivariate Medical Text- and Time-Series Data
+
 [![DOI](https://img.shields.io/badge/DOI-10.13140/RG.2.2.14827.60963-blue.svg)](https://doi.org/10.13140/RG.2.2.14827.60963)
 [![Static Analysis](https://github.com/StanfordBDHG/OpenTSLM/actions/workflows/static-analysis.yml/badge.svg)](https://github.com/StanfordBDHG/OpenTSLM/actions/workflows/static-analysis.yml)
 
-
-Large Language Models (LLMs) have emerged as powerful tools for interpreting multimodal data (e.g., images, audio, text), often surpassing specialized models. In medicine, they hold particular promise for synthesizing large volumes of clinical information into actionable insights and patient-facing digital health applications.  Yet, a major limitation remains their inability to handle time series data. To overcome this gap, we present OpenTSLM, a family of Time Series Language Models (TSLMs) created by integrating time series as a native modality to pretrained Large Language Models, enabling natural-language prompting and reasoning over multiple time series of any length [...] **[🔗 Read the full paper](https://doi.org/10.13140/RG.2.2.14827.60963)**  
+Large Language Models (LLMs) have emerged as powerful tools for interpreting multimodal data (e.g., images, audio, text), often surpassing specialized models. In medicine, they hold particular promise for synthesizing large volumes of clinical information into actionable insights and patient-facing digital health applications. Yet, a major limitation remains their inability to handle time series data. To overcome this gap, we present OpenTSLM, a family of Time Series Language Models (TSLMs) created by integrating time series as a native modality to pretrained Large Language Models, enabling natural-language prompting and reasoning over multiple time series of any length [...] **[🔗 Read the full paper](https://doi.org/10.13140/RG.2.2.14827.60963)**
 
 <p align="center">
   <img src="assets/schematic_overview_3.png" alt="Schematic Overview" width="100%">
 </p>
-
 
 ## Examples
 
@@ -28,7 +27,6 @@ OpenTSLM models can reason over multiple time series of any length at once, gene
     <img src="assets/m4_caption.png" alt="M4 Caption" width="34%">
 
 </p>
-
 
 ## Installation
 
@@ -43,6 +41,7 @@ OpenTSLM models can reason over multiple time series of any length at once, gene
    pip install -r requirements.txt
    ```
 
+> 📘 **Need a comprehensive guide?** Check out [STARTUP_GUIDE.md](STARTUP_GUIDE.md) for detailed information on training, evaluation, inference, data handling, GPU usage, and troubleshooting.
 
 ## LLM Setup
 
@@ -79,18 +78,17 @@ OpenTSLM has been tested and works with the following models:
 
 Other variants may work but have not been extensively tested.
 
-
 ## Multi-stage training (Curriculum)
 
 OpenTSLM uses curriculum learning with progressive training stages:
 
 ### Training Stages
 
-1. **Stage 1 (MCQ)**: Multiple choice questions on time series data (TSQA dataset)
-2. **Stage 2 (Captioning)**: Generate detailed captions for time series (M4 dataset)
+1. **Stage 1 (MCQ)**: Multiple choice questions on time series data (TSQA dataset) - [Detailed Guide](STAGE1_TSQA_DETAILED_GUIDE.md)
+2. **Stage 2 (Captioning)**: Generate detailed captions for time series (M4 dataset) - [Detailed Guide](STAGE2_M4_DETAILED_GUIDE.md)
 3. **Stage 3 (CoT)**: Chain-of-thought reasoning on human activity recognition (HAR dataset)
-4. **Stage 4 (Sleep CoT)**: Chain-of-thought reasoning on sleep stage classification (SleepEDF dataset)
-5. **Stage 5 (ECG CoT)**: Chain-of-thought reasoning on ECG question answering (ECG QA dataset)
+4. **Stage 4 (Sleep CoT)**: Chain-of-thought reasoning on sleep stage classification (SleepEDF dataset) - [Detailed Guide](STAGE4_SLEEP_COT_DETAILED_GUIDE.md)
+5. **Stage 5 (ECG CoT)**: Chain-of-thought reasoning on ECG question answering (ECG QA dataset) - [Detailed Guide](STAGE5_ECG_QA_COT_DETAILED_GUIDE.md)
 
 > **⚠️ MPS/CUDA Compatibility Warning:**
 >
@@ -136,7 +134,6 @@ python curriculum_learning.py --model OpenTSLMFlamingo --eval_only
 - `--batch_size`: Batch size for training
 - `--gradient_checkpointing`: Enable gradient checkpointing for memory efficiency
 - `--verbose`: Enable verbose logging
-
 
 ## 📁 Results Structure
 
@@ -193,10 +190,10 @@ results/
 
 Each stage automatically loads the best model from the previous stage, ensuring proper curriculum progression. Results are organized by model ID (sanitized), then by model type and stage. The `{llm_id}` directory name is derived from the `--llm_id` parameter (e.g., `meta-llama/Llama-3.2-1B` becomes `Llama3_2_1B`, `google/gemma-3-1b-pt` becomes `gemma_3_1b_pt`).
 
-
 ## Authors
 
 This work was made possible through the collaborative efforts of an interdisciplinary team of researchers from computer science, medicine, and engineering. Thank you to all of the Co-authors of the TSLM publication:
+
 - Patrick Langer (Stanford University, ETH Zurich, ETH Agentic Systems Lab)
 - Thomas Kaar (Stanford University, TUM, ETH Agentic Systems Lab)
 - Max Rosenblattl (Stanford University, TUM, ETH Agentic Systems Lab)
@@ -223,7 +220,6 @@ Contributions to this project are welcome. Please make sure to read the [contrib
 
 You can find a list of all current contributors at [CONTRIBUTORS.md](CONTRIBUTORS.md).
 
-
 ## Research Opportunities
 
 Are you a student interested in advancing the frontiers of time-series language models and digital health research? We welcome students to get involved in our research projects!
@@ -231,7 +227,6 @@ Are you a student interested in advancing the frontiers of time-series language 
 Visit our [Student Research Opportunities page](http://bdh.stanford.edu/studentresearch) to learn more about current projects and how you can contribute to cutting-edge research at the intersection of AI and healthcare.
 
 For researchers and project partners interested in collaboration opportunities, please reach out to us at **digitalhealthresearch@stanford.edu**.
-
 
 ## License
 
