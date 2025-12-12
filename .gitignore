@@ -1,11 +1,57 @@
-venv
-__pycache__
-.DS_STORE
-**/.DS_STORE
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+.Python
 
-raw_data
+# Virtual Environments (HEAVY - DO NOT COMMIT)
+opentslm_env/
+specdifftree_env/
+venv/
+env/
+ENV/
 
+# Model files (HEAVY - DO NOT COMMIT)
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin
+checkpoints/
+models/
 
-*.ts
+# Results & Data (HEAVY)
+results/
+raw_data/
+data/raw/
+data/processed/
+*.npy
+*.npz
+*.h5
+*.hdf5
+
+# Wandb & Logs (HEAVY)
+wandb/
+.wandb/
+*.log
+*.pid
+
+# Archives
 *.zip
-./__pycache__.env
+*.tar
+*.gz
+*.ts
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Environment
+.env
