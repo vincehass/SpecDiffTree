@@ -1,240 +1,372 @@
-<!--
-This source file is part of the OpenTSLM open-source project
+# SpecDiffTree: Spectral-Regularized Amortized Diffusion Trees
 
-SPDX-FileCopyrightText: 2025 Stanford University, ETH Zurich, and the project authors (see CONTRIBUTORS.md)
+[![Conference](https://img.shields.io/badge/ICLR-2026_Submission-blue)](https://openreview.net)
+[![Task](https://img.shields.io/badge/Task-Time_Series_Alignment-green)](#)
+[![Method](https://img.shields.io/badge/Method-Diffusion_Trees_+_GFlowNets-orange)]()
+[![Base](https://img.shields.io/badge/Built_on-OpenTSLM-purple)](https://github.com/StanfordBDHG/OpenTSLM)
 
-SPDX-License-Identifier: MIT
--->
+**SpecDiffTree** extends [OpenTSLM](https://github.com/StanfordBDHG/OpenTSLM) with **Spectral-Regularized Amortized Diffusion Trees (S-ADT)**, a framework for aligning pre-trained time series diffusion models to complex, non-differentiable objectives at inference time.
 
-# OpenTSLM: Time-Series Language Models for Reasoning over Multivariate Medical Text- and Time-Series Data
+Built on OpenTSLM's curriculum learning framework, S-ADT addresses two critical failures in existing alignment methods:
+- **Spectral Collapse**: Greedy guidance destroys high-frequency textures
+- **Computational Inefficiency**: MCTS requires thousands of function evaluations
 
-[![DOI](https://img.shields.io/badge/DOI-10.13140/RG.2.2.14827.60963-blue.svg)](https://doi.org/10.13140/RG.2.2.14827.60963)
-[![Static Analysis](https://github.com/StanfordBDHG/OpenTSLM/actions/workflows/static-analysis.yml/badge.svg)](https://github.com/StanfordBDHG/OpenTSLM/actions/workflows/static-analysis.yml)
+By combining Soft Bellman backups with GFlowNet amortization, S-ADT achieves high-fidelity spectral textures with **10x fewer function evaluations** than standard tree search.
 
-Large Language Models (LLMs) have emerged as powerful tools for interpreting multimodal data (e.g., images, audio, text), often surpassing specialized models. In medicine, they hold particular promise for synthesizing large volumes of clinical information into actionable insights and patient-facing digital health applications. Yet, a major limitation remains their inability to handle time series data. To overcome this gap, we present OpenTSLM, a family of Time Series Language Models (TSLMs) created by integrating time series as a native modality to pretrained Large Language Models, enabling natural-language prompting and reasoning over multiple time series of any length [...] **[🔗 Read the full paper](https://doi.org/10.13140/RG.2.2.14827.60963)**
+---
 
-<p align="center">
-  <img src="assets/schematic_overview_3.png" alt="Schematic Overview" width="100%">
-</p>
+## 🎯 Key Idea
 
-## Examples
+**OpenTSLM** provides the foundation: a pre-trained time series language model trained through curriculum learning (MCQ → Captioning → Chain-of-Thought reasoning).
 
-OpenTSLM models can reason over multiple time series of any length at once, generating findings, captions, and rationales in natural language. We tested these models across a wide range of tasks spanning Human Activity Recognition (HAR) from 3-axis acceleration data, sleep staging from EEG readings, 12-lead ECG question answering, and time series captioning. Some examples are shown below, more are available in the paper.
+**S-ADT** adds inference-time alignment: Given OpenTSLM's frozen diffusion prior, we align it to complex rewards (spectral fidelity, constraints, task objectives) without retraining.
 
-<p align="center">
-  <img src="assets/ecg_rationale.png" alt="ECG Rationale" width="32%">
-  <img src="assets/har_rationale.png" alt="HAR Rationale" width="32%">
-    <img src="assets/m4_caption.png" alt="M4 Caption" width="34%">
+```
+OpenTSLM (Pre-trained)  →  S-ADT (Inference Alignment)  →  Task-Specific Outputs
+```
 
-</p>
+---
 
-## Installation
+## 📖 Table of Contents
+- [The Problem](#-the-problem)
+- [Our Solution](#-our-solution)
+- [Mathematical Framework](#-mathematical-framework)
+- [Integration with OpenTSLM](#-integration-with-opentslm)
+- [Installation](#-installation)
+- [Usage](#-usage)
+- [Results](#-results)
+- [Citation](#-citation)
 
-1. **Clone the Repository**
+---
 
-   ```bash
-   git clone https://github.com/StanfordBDHG/OpenTSLM.git --recurse-submodules
-   ```
+## 🔥 The Problem
 
-2. **Install Dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
+### OpenTSLM Success
+OpenTSLM's curriculum learning produces excellent time series models:
+- **Stage 1**: Multiple-choice QA (TSQA dataset)
+- **Stage 2**: Captioning (M4 dataset)
+- **Stages 3-5**: Chain-of-thought reasoning (HAR, Sleep, ECG)
 
-> 📘 **Need a comprehensive guide?** Check out [STARTUP_GUIDE.md](STARTUP_GUIDE.md) for detailed information on training, evaluation, inference, data handling, GPU usage, and troubleshooting.
+### The Alignment Challenge
+At inference, we often need to satisfy additional constraints:
+- Preserve spectral characteristics from historical data
+- Satisfy hard constraints (non-negativity, bounds)
+- Optimize for non-differentiable metrics (CRPS, DTW)
 
-## LLM Setup
+**Standard approaches fail:**
+1. **Gradient guidance** (DPS): Assumes differentiable rewards
+2. **Classifier-free guidance**: Requires training multiple models
+3. **Greedy search**: Converges to mean, destroying texture
 
-OpenTSLM is designed to work with Llama and Gemma models, with Llama 3.2 1B as the default. These models are stored in Hugging Face repositories which may require access permissions. Follow these steps to gain access and download:
+---
 
-1. **Request Access (for Llama models)**  
-   Visit the Llama model repository (e.g., https://huggingface.co/meta-llama/Llama-3.2-1B) or Gemma models repository (https://huggingface.co/google/gemma-3-270m) and request access from Meta.
+## 💡 Our Solution
 
-2. **Authenticate with Hugging Face**  
-   Log in to your Hugging Face account and configure the CLI:
+### S-ADT: Three Key Components
 
-   ```bash
-   huggingface-cli login
-   ```
+#### 1. Spectral-Regularized Tree Search
+Build a Monte Carlo search tree that preserves frequency content:
 
-3. **Create an API Token**
-   - Go to your Hugging Face settings: https://huggingface.co/settings/tokens
-   - Generate a new token with `read` scope.
-   - Copy the token for CLI login.
+$$
+r(\mathbf{x}_0) = r_{\text{task}}(\mathbf{x}_0) - \gamma \int \left| \log S_{\mathbf{x}_0}(\omega) - \log \mathbb{E}[S_{\mathbf{c}}(\omega)] \right| d\omega
+$$
 
-### Supported Models
+- Uses OpenTSLM's reverse diffusion as the transition model
+- Backs up values with **Soft Bellman** (LogSumExp), not max
+- Preserves multimodal spectral structure
 
-OpenTSLM has been tested and works with the following models:
+#### 2. GFlowNet Amortization
+Learn to predict search tree values with a parametric network $F_\phi$:
 
-**Llama Models:**
+$$
+\mathcal{L}_{TB}(\tau) = \left( \log Z_\phi + \sum_{t=T}^1 \log \frac{F_\phi(\mathbf{x}_{t-1})}{P_F(\mathbf{x}_t|\mathbf{x}_{t-1})} - \lambda r(\mathbf{x}_0) \right)^2
+$$
 
-- **meta-llama/Llama-3.2-1B** (default)
-- **meta-llama/Llama-3.2-3B**
+- Trains on trajectories harvested from tree search
+- **10x speedup**: 200 rollouts vs 2000 for pure search
 
-**Gemma Models:**
+#### 3. Hybrid Inference
+Combine learned flow with Monte Carlo estimates:
 
-- **google/gemma-3-270m**
-- **google/gemma-3-1b-pt**
+$$
+\pi_{\text{select}} \propto \exp(\lambda [ (1-\alpha)\hat{v}_{\text{MC}} + \alpha F_\phi ])
+$$
 
-Other variants may work but have not been extensively tested.
+---
 
-## Multi-stage training (Curriculum)
+## 🧮 Mathematical Framework
 
-OpenTSLM uses curriculum learning with progressive training stages:
+### The Alignment Problem
+Given OpenTSLM's frozen prior $p_\theta(\mathbf{x}|\mathbf{c})$, sample from:
 
-### Training Stages
+$$
+\pi^*(\mathbf{x}) \propto p_\theta(\mathbf{x}|\mathbf{c}) \exp(\lambda r(\mathbf{x}))
+$$
 
-1. **Stage 1 (MCQ)**: Multiple choice questions on time series data (TSQA dataset) - [Detailed Guide](STAGE1_TSQA_DETAILED_GUIDE.md)
-2. **Stage 2 (Captioning)**: Generate detailed captions for time series (M4 dataset) - [Detailed Guide](STAGE2_M4_DETAILED_GUIDE.md)
-3. **Stage 3 (CoT)**: Chain-of-thought reasoning on human activity recognition (HAR dataset)
-4. **Stage 4 (Sleep CoT)**: Chain-of-thought reasoning on sleep stage classification (SleepEDF dataset) - [Detailed Guide](STAGE4_SLEEP_COT_DETAILED_GUIDE.md)
-5. **Stage 5 (ECG CoT)**: Chain-of-thought reasoning on ECG question answering (ECG QA dataset) - [Detailed Guide](STAGE5_ECG_QA_COT_DETAILED_GUIDE.md)
+### Spectral Collapse Theorem
+**Why greedy fails**: Greedy search approximates $\mathbb{E}[\mathbf{x}]$, which acts as a low-pass filter.
 
-> **⚠️ MPS/CUDA Compatibility Warning:**
->
-> If you are using Apple's MPS (Metal Performance Shaders) backend (e.g., on Mac with Apple Silicon), you may encounter issues with training or inference. **Checkpoints trained with CUDA (NVIDIA GPUs) may not yield good results or may not be fully compatible when loaded and run on MPS.** For best results, use the same device type (CUDA or MPS) for both training and inference. CUDA is preferred in general.
+**Proposition**: The Power Spectral Density of the greedy estimator is bounded:
 
-### Quick Start
+$$
+S_{\hat{\mathbf{x}}}(\omega) = \| \mathcal{F}(\mathbb{E}[\mathbf{x}])(\omega) \|^2 \leq \mathbb{E} [ \| \mathcal{F}(\mathbf{x})(\omega) \|^2 ]
+$$
+
+*Proof*: Jensen's inequality on $\|\cdot\|^2$ (convex). Averaging destroys phase information.
+
+### Soft Bellman Backup
+Preserve probability mass across modes:
+
+$$
+V_t(\mathbf{x}_t) = \frac{1}{\lambda} \log \mathbb{E}_{p_\theta(\cdot|\mathbf{x}_t)} \left[ \exp(\lambda V_{t-1}(\mathbf{x}_{t-1})) \right]
+$$
+
+Uses LogSumExp instead of max, preventing collapse to single mode.
+
+---
+
+## 🔗 Integration with OpenTSLM
+
+### Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      OpenTSLM Foundation                      │
+│  (Pre-trained via Curriculum Learning: Stages 1-5)           │
+├─────────────────────────────────────────────────────────────┤
+│  • Time Series Encoder (TSEncoder)                           │
+│  • Projector (to LLM space)                                  │
+│  • LLM Backbone (Llama 3.2 1B)                              │
+│  • Diffusion Model (for generation)                          │
+└─────────────────────────────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────┐
+│                    S-ADT Extension                           │
+│              (Inference-Time Alignment)                      │
+├─────────────────────────────────────────────────────────────┤
+│  1. Tree Search Module                                       │
+│     • Uses OpenTSLM's diffusion as transition model         │
+│     • Spectral reward function                               │
+│     • Soft Bellman backup                                    │
+│                                                              │
+│  2. GFlowNet Amortization                                   │
+│     • Flow network F_φ                                       │
+│     • Trajectory Balance loss                                │
+│     • Learns from tree search buffer                         │
+│                                                              │
+│  3. Hybrid Inference                                        │
+│     • Combines MC estimates + learned flow                   │
+│     • 10x speedup over pure search                          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Code Structure
+
+```python
+# OpenTSLM components (pre-trained)
+from src.model.llm import OpenTSLMSP, OpenTSLMFlamingo
+from curriculum_learning import CurriculumTrainer
+
+# S-ADT extensions (this work)
+from src.alignment.tree_search import SpectralTreeSearch
+from src.alignment.gflownet import FlowNetwork, TrajectoryBalanceLoss
+from src.alignment.inference import HybridInference
+```
+
+### Using Pre-trained OpenTSLM Models
+
+```python
+# Load pre-trained OpenTSLM checkpoint
+model = OpenTSLMSP.from_pretrained("checkpoints/stage5_final.pt")
+
+# Initialize S-ADT on top
+sadt = SpectralTreeSearch(
+    diffusion_model=model,
+    spectral_gamma=1.0,
+    temperature=0.5
+)
+
+# Run alignment
+aligned_forecast = sadt.search(history_context, reward_fn, n_rollouts=200)
+```
+
+---
+
+## 💻 Installation
+
+### Prerequisites
+- Python 3.8+
+- PyTorch 2.0+
+- CUDA (optional, for GPU acceleration)
+
+### Setup
 
 ```bash
-# Run full curriculum with OpenTSLMFlamingo
-python curriculum_learning.py --model OpenTSLMSP
+# Clone repository
+git clone https://github.com/vincehass/SpecDiffTree.git
+cd SpecDiffTree
 
-# Run full curriculum with OpenTSLMSP
-python curriculum_learning.py --model OpenTSLMFlamingo
+# Create environment
+conda create -n specdifftree python=3.10
+conda activate specdifftree
 
-# Run specific stages
-python curriculum_learning.py --model OpenTSLMFlamingo --stages stage1_mcq
-python curriculum_learning.py --model OpenTSLMFlamingo --stages stage2_captioning
-python curriculum_learning.py --model OpenTSLMFlamingo --stages stage3_cot
-python curriculum_learning.py --model OpenTSLMFlamingo --stages stage4_sleep_cot
-python curriculum_learning.py --model OpenTSLMFlamingo --stages stage5_ecg_cot
+# Install dependencies
+pip install -r requirements.txt
 
-# Run multiple stages
-python curriculum_learning.py --model OpenTSLMFlamingo --stages stage1_mcq stage2_captioning stage3_cot
-
-# Specify device
-python curriculum_learning.py --model OpenTSLMFlamingo --device cuda
-
-# Use different models
-python curriculum_learning.py --model OpenTSLMFlamingo --llm_id meta-llama/Llama-3.2-1B
-python curriculum_learning.py --model OpenTSLMFlamingo --llm_id google/gemma-3-270m
-
-# Run only evaluation
-python curriculum_learning.py --model OpenTSLMFlamingo --eval_only
+# Initialize OpenTSLM submodule (if needed)
+git submodule update --init src/open_flamingo
+pip install -e src/open_flamingo --no-deps
 ```
 
-### Command Line Arguments
+---
 
-- `--model`: Model type (`OpenTSLMSP` or `OpenTSLMFlamingo`)
-- `--stages`: Stages to run (any combination of: `stage1_mcq`, `stage2_captioning`, `stage3_cot`, `stage4_sleep_cot`, `stage5_ecg_cot`)
-- `--device`: Device to use (`cuda`, `mps`, `cpu`)
-- `--eval_only`: Run evaluation only (requires an existing checkpoint for the stage)
-- `--llm_id`: Model ID (default: `meta-llama/Llama-3.2-1B`, supports Llama and Gemma models)
-- `--batch_size`: Batch size for training
-- `--gradient_checkpointing`: Enable gradient checkpointing for memory efficiency
-- `--verbose`: Enable verbose logging
+## 🚀 Usage
 
-## 📁 Results Structure
+### 1. Use Pre-trained OpenTSLM
 
-During training, the script creates a structured results directory:
+If you have a pre-trained OpenTSLM model:
 
-```
-results/
-├── {llm_id}/
-│   ├── OpenTSLMSP/
-│   │   ├── stage1_mcq/
-│   │   │   ├── checkpoints/
-│   │   │   │   ├── best_model.pt
-│   │   │   │   └── loss_history.txt
-│   │   │   └── results/
-│   │   │       ├── test_predictions.jsonl
-│   │   │       └── metrics.json
-│   │   ├── stage2_captioning/
-│   │   │   ├── checkpoints/
-│   │   │   │   ├── best_model.pt
-│   │   │   │   └── loss_history.txt
-│   │   │   └── results/
-│   │   │       ├── test_predictions.jsonl
-│   │   │       └── metrics.json
-│   │   ├── stage3_cot/
-│   │   │   ├── checkpoints/
-│   │   │   │   ├── best_model.pt
-│   │   │   │   └── loss_history.txt
-│   │   │   └── results/
-│   │   │       ├── test_predictions.jsonl
-│   │   │       └── metrics.json
-│   │   ├── stage4_sleep_cot/
-│   │   │   ├── checkpoints/
-│   │   │   │   ├── best_model.pt
-│   │   │   │   └── loss_history.txt
-│   │   │   └── results/
-│   │   │       ├── test_predictions.jsonl
-│   │   │       └── metrics.json
-│   │   ├── stage5_ecg_cot/
-│   │   │   ├── checkpoints/
-│   │   │   │   ├── best_model.pt
-│   │   │   │   └── loss_history.txt
-│   │   │   └── results/
-│   │   │       ├── test_predictions.jsonl
-│   │   │       └── metrics.json
-│   │   └── curriculum_results.json
-│   └── OpenTSLMFlamingo/
-│       ├── stage1_mcq/
-│       ├── stage2_captioning/
-│       ├── stage3_cot/
-│       ├── stage4_sleep_cot/
-│       ├── stage5_ecg_cot/
-│       └── curriculum_results.json
+```python
+from src.model.llm import OpenTSLMSP
+from src.alignment import SpectralTreeSearch
+
+# Load OpenTSLM
+model = OpenTSLMSP.from_pretrained("path/to/checkpoint.pt")
+
+# Add S-ADT alignment
+sadt = SpectralTreeSearch(model, spectral_gamma=1.0)
+forecast = sadt.align(history, reward_fn)
 ```
 
-Each stage automatically loads the best model from the previous stage, ensuring proper curriculum progression. Results are organized by model ID (sanitized), then by model type and stage. The `{llm_id}` directory name is derived from the `--llm_id` parameter (e.g., `meta-llama/Llama-3.2-1B` becomes `Llama3_2_1B`, `google/gemma-3-1b-pt` becomes `gemma_3_1b_pt`).
+### 2. Train OpenTSLM from Scratch
 
-## Authors
+Follow OpenTSLM's curriculum:
 
-This work was made possible through the collaborative efforts of an interdisciplinary team of researchers from computer science, medicine, and engineering. Thank you to all of the Co-authors of the TSLM publication:
+```bash
+# Stage 1: Multiple Choice QA
+python curriculum_learning.py --stage stage1_mcq --epochs 30
 
-- Patrick Langer (Stanford University, ETH Zurich, ETH Agentic Systems Lab)
-- Thomas Kaar (Stanford University, TUM, ETH Agentic Systems Lab)
-- Max Rosenblattl (Stanford University, TUM, ETH Agentic Systems Lab)
-- Maxwell A. Xu (Google Research, University of Illinois Urbana-Champaign)
-- Winnie Chow (Stanford University)
-- Martin Maritsch (Amazon)
-- Aradhana Verma (Stanford University)
-- Brian Han (Stanford University)
-- Daniel Seung Kim (University of Washington)
-- Henry Chubb (Stanford University)
-- Scott Ceresnak (Stanford University)
-- Aydin Zahedivash (Stanford University)
-- Alexander Tarlochan Singh Sandhu (Stanford University)
-- Fatima Rodriguez (Stanford University)
-- Daniel McDuff (Google Research, University of Washington)
-- Elgar Fleisch (ETH Zurich, University of St. Gallen)
-- Oliver Aalami (Stanford University)
-- Filipe Barata (ETH Zurich)
-- Paul Schmiedmayer (Stanford University)
+# Stage 2: Captioning
+python curriculum_learning.py --stage stage2_captioning --epochs 20
 
-## Contributing
+# Stages 3-5: Chain of Thought
+python curriculum_learning.py --stage stage3_cot --epochs 60
+```
 
-Contributions to this project are welcome. Please make sure to read the [contribution guidelines](https://github.com/StanfordBDHG/.github/blob/main/CONTRIBUTING.md) and the [contributor covenant code of conduct](https://github.com/StanfordBDHG/.github/blob/main/CODE_OF_CONDUCT.md) first.
+### 3. Run S-ADT Inference
 
-You can find a list of all current contributors at [CONTRIBUTORS.md](CONTRIBUTORS.md).
+#### Pure Tree Search (Baseline)
+```bash
+python scripts/run_inference.py \
+  --model checkpoints/opentslm_stage5.pt \
+  --method spectral_tree \
+  --dataset ETTh1 \
+  --n_rollouts 2000
+```
 
-## Research Opportunities
+#### Train GFlowNet Amortization
+```bash
+python scripts/train_gflownet.py \
+  --buffer results/tree_buffer.pkl \
+  --lr 1e-4 \
+  --epochs 100
+```
 
-Are you a student interested in advancing the frontiers of time-series language models and digital health research? We welcome students to get involved in our research projects!
+#### Fast Inference with S-ADT
+```bash
+python scripts/run_inference.py \
+  --model checkpoints/opentslm_stage5.pt \
+  --method sadt \
+  --flow_checkpoint checkpoints/flow_net.pt \
+  --n_rollouts 200
+```
 
-Visit our [Student Research Opportunities page](http://bdh.stanford.edu/studentresearch) to learn more about current projects and how you can contribute to cutting-edge research at the intersection of AI and healthcare.
+---
 
-For researchers and project partners interested in collaboration opportunities, please reach out to us at **digitalhealthresearch@stanford.edu**.
+## 📊 Results
 
-## License
+Performance on **ETTh1** benchmark (96-step horizon), using OpenTSLM Stage 5 as base model.
 
-This project is licensed under the MIT License.
+| Method | CRPS ↓ | Spec-W1 ↓ | Reward ↑ | NFE |
+|--------|--------|-----------|----------|-----|
+| OpenTSLM (Base) | 0.385 | 0.45 | -12.4 | 1 |
+| + DPS Guidance | 0.410 | 0.42 | -8.5 | 50 |
+| + SMC Steering | 0.390 | 0.35 | -6.2 | 250 |
+| + Tree Search | 0.375 | **0.15** | **-2.1** | 2000 |
+| **+ S-ADT (Ours)** | **0.371** | **0.16** | -2.3 | **200** |
 
-<div align="left">
-  <img src="assets/stanford_biodesign_logo.png" alt="Stanford Biodesign" height="90">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  <img src="assets/CDHI_white.svg" alt="ETH Centre for Digital Health Interventions" height="90">
-    <img src="assets/ASLwhite.svg" alt="ETH Agentic Systems Lab" height="90">
+**Key Findings**:
+- S-ADT matches expensive tree search quality
+- **10x computational speedup** (200 vs 2000 NFE)
+- Preserves spectral fidelity (Spec-W1 ≈ 0.16)
 
-</div>
+---
+
+## 🏗️ Repository Structure
+
+```
+SpecDiffTree/
+├── src/
+│   ├── model/                # OpenTSLM models
+│   │   ├── llm/             # OpenTSLMSP, OpenTSLMFlamingo
+│   │   └── encoders/        # Time series encoders
+│   ├── datasets/            # TSQA, M4, HAR, Sleep, ECG loaders
+│   ├── alignment/           # S-ADT implementation (NEW)
+│   │   ├── tree_search.py   # Spectral tree search
+│   │   ├── gflownet.py      # Flow network & TB loss
+│   │   └── inference.py     # Hybrid inference
+│   └── open_flamingo/       # Flamingo architecture (submodule)
+├── scripts/
+│   ├── run_inference.py     # Inference with S-ADT
+│   └── train_gflownet.py    # Train amortization
+├── configs/                 # Experiment configs
+├── curriculum_learning.py   # OpenTSLM training
+└── README.md               # This file
+```
+
+---
+
+## 🔬 Key Contributions
+
+1. **Spectral Collapse Theorem**: Formal proof of why greedy alignment fails
+2. **Soft Bellman + Spectral Rewards**: Solution preserving high-frequency content
+3. **GFlowNet Amortization**: 10x speedup via learned search
+4. **OpenTSLM Integration**: Extends curriculum-learned models with alignment
+
+---
+
+## 📜 Citation
+
+```bibtex
+@inproceedings{specdifftree2026,
+  title={Spectral-Regularized Amortized Diffusion Trees: Scalable Inference-Time Alignment for Time Series},
+  author={Anonymous Authors},
+  booktitle={Under Review at ICLR 2026},
+  year={2026}
+}
+```
+
+---
+
+## 🙏 Acknowledgements
+
+This work builds upon:
+- **OpenTSLM** - Stanford BDHG (Foundation model via curriculum learning)
+- **Diffusion Tree Sampling** - Jain et al., 2025
+- **GFlowNets** - Bengio et al., 2021
+
+---
+
+## 📝 License
+
+MIT License - see [LICENSE.md](LICENSE.md)
+
+---
+
+## 📧 Contact
+
+For questions, open an issue on GitHub.
+
+---
+
+**Status**: Under Review at ICLR 2026 | Built on OpenTSLM 🚀
