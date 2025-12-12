@@ -1,0 +1,41 @@
+# SpecDiffTree - CPU Training
+# For systems without GPU acceleration
+
+experiment:
+  name: "specdifftree_cpu"
+  tags: ["specdifftree", "cpu", "stage1"]
+  notes: "CPU training configuration"
+
+dataset:
+  name: "TSQA"
+  task: "Multiple Choice Question Answering"
+  num_samples_train: 6300
+  num_samples_val: 630
+  num_samples_test: 700
+
+model:
+  type: "OpenTSLMSP"
+  llm_id: "meta-llama/Llama-3.2-1B"
+  gradient_checkpointing: true  # Save memory on CPU
+  lora:
+    enabled: false
+
+training:
+  num_epochs: 30
+  batch_size: 2  # Smaller for CPU
+  lr_encoder: 2.0e-4
+  lr_projector: 1.0e-4
+  lr_base: 2.0e-4
+  weight_decay: 1.0e-2
+  grad_clip_norm: 1.0
+  warmup_fraction: 0.03
+  early_stopping_patience: 5
+  patch_size: 4
+
+device:
+  type: "cpu"
+  
+evaluation:
+  metrics: ["accuracy", "loss"]
+  save_predictions: true
+

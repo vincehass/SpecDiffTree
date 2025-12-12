@@ -1,0 +1,41 @@
+# SpecDiffTree - Quick Test (Apple Silicon MPS)
+# Fast 2-epoch validation for development
+
+experiment:
+  name: "specdifftree_quick_test"
+  tags: ["specdifftree", "mps", "stage1", "quick"]
+  notes: "Quick 2-epoch test with Apple Silicon GPU acceleration"
+
+dataset:
+  name: "TSQA"
+  task: "Multiple Choice Question Answering"
+  num_samples_train: 6300
+  num_samples_val: 630
+  num_samples_test: 700
+
+model:
+  type: "OpenTSLMSP"
+  llm_id: "meta-llama/Llama-3.2-1B"
+  gradient_checkpointing: false
+  lora:
+    enabled: false
+
+training:
+  num_epochs: 2
+  batch_size: 4
+  lr_encoder: 2.0e-4
+  lr_projector: 1.0e-4
+  lr_base: 2.0e-4
+  weight_decay: 1.0e-2
+  grad_clip_norm: 1.0
+  warmup_fraction: 0.03
+  early_stopping_patience: 5
+  patch_size: 4
+
+device:
+  type: "mps"  # Apple Silicon GPU
+  
+evaluation:
+  metrics: ["accuracy", "loss"]
+  save_predictions: true
+
