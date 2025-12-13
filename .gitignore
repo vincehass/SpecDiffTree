@@ -14,13 +14,19 @@ env/
 ENV/
 
 # Model files (HEAVY - DO NOT COMMIT)
+*.safetensors
 *.pt
 *.pth
 *.ckpt
-*.safetensors
 *.bin
 checkpoints/
+checkpoints_pretrained/
+mlx_training/checkpoints/
 models/
+
+# OpenFlamingo data (HEAVY)
+src/open_flamingo/open_flamingo/eval/data/
+src/open_flamingo/open_flamingo/eval/*.json
 
 # Results & Data (HEAVY)
 results/
