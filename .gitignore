@@ -22,7 +22,10 @@ ENV/
 checkpoints/
 checkpoints_pretrained/
 mlx_training/checkpoints/
-models/
+
+# Ignore model binaries but not source code
+/models/
+!dts_implementation/models/*.py
 
 # OpenFlamingo data (HEAVY)
 src/open_flamingo/open_flamingo/eval/data/
