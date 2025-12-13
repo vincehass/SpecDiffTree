@@ -299,6 +299,38 @@ SpecDiffTree/
 
 ---
 
+## 🧪 Multi-Stage Evaluation
+
+SpecDiffTree includes comprehensive evaluation infrastructure for OpenTSLM's 5-stage curriculum:
+
+| Stage | Task | Model | Status |
+|-------|------|-------|--------|
+| **1** | TSQA (MCQ) | `llama-3.2-1b-tsqa-sp` | ✅ Tested (81x exploration) |
+| **2** | M4 Captioning | `llama-3.2-1b-m4-sp` | 📦 Ready |
+| **3** | HAR CoT | `llama-3.2-1b-har-sp` | 📦 Ready |
+| **4** | Sleep CoT | `llama-3.2-1b-sleep-sp` | 📦 Ready |
+| **5** | ECG QA CoT | `llama-3.2-1b-ecg-sp` | 📦 Ready |
+
+### Run Multi-Stage Evaluation
+
+```bash
+# Evaluate all stages with MLX
+python evaluation/run_mlx_eval.py --stages 1 2 3 4 5 --num-prompts 5 --num-rollouts 20
+
+# Generate performance figures
+python evaluation/generate_figures.py
+
+# Results saved to evaluation/results/
+```
+
+**Evaluation Metrics:**
+- Tree statistics (nodes, depth, branching)
+- Task performance (accuracy, F1, BLEU)
+- Compute efficiency analysis
+- Quality vs. rollouts comparison
+
+---
+
 ## 🎓 Theoretical Foundation
 
 This implementation is based on:
