@@ -47,6 +47,27 @@ wandb/
 *.log
 *.pid
 
+# Documentation - Plans, Guides, Status (Session-specific)
+docs/plans/*_PLAN.md
+docs/plans/*_STEPS.md
+docs/plans/TOMORROW_*.md
+docs/plans/TODAY_*.md
+docs/plans/START_HERE_*.md
+docs/status/*_STATUS.md
+docs/status/*_UPDATE.md
+docs/status/*_REPORT.md
+docs/status/BUG*.md
+docs/guides/QUICK_*.md
+docs/guides/RUN_*.md
+
+# Keep only essential docs
+!README.md
+!LICENSE.md
+!CITATION.cff
+!ARCHITECTURE.md
+!CONTRIBUTORS.md
+!REUSE.toml
+
 # Archives
 *.zip
 *.tar
@@ -64,3 +85,4 @@ wandb/
 
 # Environment
 .env
+dts_paper_repo/

@@ -14,12 +14,46 @@
 
 ## 🔥 Key Results
 
+### Latest: Comprehensive 4-Method Comparison ✨ **(NEW!)**
+
+**Parallel Evaluation Framework** (Llama 3.2 1B, 250 samples each, M4 dataset):
+- ✅ **Greedy Baseline:** Fast reference (15-20 min)
+- ✅ **MCTS:** Monte Carlo Tree Search (40-60 min)
+- ✅ **DTS:** Diffusion Tree Sampling (40-60 min)
+- ✅ **MaxEnt-TS:** Maximum Entropy Tree Search (60-90 min)
+
+**10 Comprehensive Metrics Tracked:**
+- NFE (Number of Function Evaluations)
+- Time, Reward, Perplexity, Diversity
+- Accuracy, Tree Depth, Branching Factor
+- Success Rate, Sequence Length
+
+**Automated Pipeline:**
+- 🚀 Parallel execution (3-4× faster than sequential)
+- 📊 WandB integration for live tracking
+- 📈 Automatic figure generation (6 publication-quality plots)
+- 🔬 Ablation study support
+
+👉 **Run it:** `./experiments/scripts/run_parallel_evaluation.sh`  
+👉 **Full details:** See `docs/` directory
+
+### Previous: Stages 2-3 Initial Evaluation
+
+**Full Evaluation** (Llama 3.2 1B, 6 prompts, 10 rollouts):
+- ✅ **Stage 2 (M4 Captioning):** 31 nodes/prompt, 7.3 min avg
+- ✅ **Stage 3 (HAR CoT):** 31 nodes/prompt, 7.5 min avg  
+- **31× more exploration** than greedy decoding!
+- **Best reward:** 0.785 (Stage 3), 0.511 (Stage 2)
+- **6 publication-quality figures** generated 📊
+
+### Initial Demo (Stage 1)
+
 **Demonstrated Performance** (Llama 3.2 1B, 4 test prompts):
 - **324 nodes explored** vs 4 for greedy baseline
-- **81x more exploration** than greedy!
+- **81× more exploration** than greedy!
 - **~40s per prompt** (PyTorch MPS on M1 Pro)
 - **~25s per prompt** (MLX on M1 Pro) - 30% faster!
-- **~8-10s per prompt** (MLX on M3 Max, estimated) - 5x faster!
+- **~8-10s per prompt** (MLX on M3 Max, estimated) - 5× faster!
 
 ---
 
@@ -45,7 +79,26 @@ $$
 
 ---
 
-## 📊 Live Demo Results
+## 📊 Evaluation Results & Figures
+
+### Comprehensive Stages 2-3 Results
+
+| Stage | Task | Nodes | Time/Prompt | Best Reward |
+|-------|------|-------|-------------|-------------|
+| **Stage 2** | M4 Captioning | 31 | 7.3 min | 0.511 |
+| **Stage 3** | HAR CoT | 31 | 7.5 min | 0.785 |
+
+**Generated Figures** (see `evaluation/figures/`):
+- 📊 **Figure 1:** Exploration Comparison (S-ADT vs Greedy)
+- 📈 **Figure 2:** Scalability Analysis  
+- ⏱️ **Figure 3:** Performance Metrics
+- 🌳 **Figure 4:** Tree Statistics
+- 📋 **Figure 5:** Method Comparison Table
+- 🎯 **Figure 6:** Summary Dashboard
+
+👉 **Full details:** [EVALUATION_RESULTS.md](EVALUATION_RESULTS.md)
+
+### Initial Demo (Stage 1)
 
 ```
 Test 1: "Question: What is 2+2? Answer:"
@@ -60,7 +113,7 @@ Aggregate Statistics:
    • Total nodes: 324 (vs 4 for greedy)
    • Average depth: 7.0
    • Average branching: 4.00
-   • Exploration improvement: 81x! 🚀
+   • Exploration improvement: 81×! 🚀
 ```
 
 ---
@@ -88,7 +141,34 @@ pip install mlx-lm
 export PYTHONPATH=$(pwd):$(pwd)/src:$PYTHONPATH
 ```
 
-### Run S-ADT Inference
+### Comprehensive Evaluation (NEW!)
+
+```bash
+# Run all 4 methods in parallel with WandB logging
+./experiments/scripts/run_parallel_evaluation.sh
+
+# Or run individual methods
+python evaluation/comprehensive_evaluation.py --method greedy --num_samples 250 --device mps
+python evaluation/comprehensive_evaluation.py --method mcts --num_samples 250 --device mps
+python evaluation/comprehensive_evaluation.py --method dts --num_samples 250 --device mps
+python evaluation/comprehensive_evaluation.py --method maxent_ts --num_samples 250 --device mps
+
+# Run ablation studies
+./experiments/scripts/run_ablation_studies.sh
+
+# Generate figures
+python evaluation/generate_ablation_figures.py --results_dir results/parallel_*/
+```
+
+**What you get:**
+- 4 JSON result files with complete metrics
+- 6 publication-quality PNG figures
+- WandB dashboard with live tracking
+- Complete logs for reproducibility
+
+See `docs/guides/COMPREHENSIVE_EVALUATION_GUIDE.md` for details.
+
+### Run S-ADT Inference (Basic)
 
 ```bash
 # Quick test (PyTorch - works everywhere)
@@ -99,6 +179,12 @@ python dts_implementation/examples/comprehensive_demo.py
 
 # MLX demo (Apple Silicon - 30% faster!)
 python dts_implementation/examples/sadt_mlx_demo.py
+
+# Full evaluation (Stages 2-3)
+python run_stages_2_3_fast.py  # 10 rollouts (~45 min)
+
+# Generate DTS paper figures
+python generate_dts_figures.py
 ```
 
 **Expected output:**
@@ -220,40 +306,76 @@ model = load_mlx_model("mlx-community/Llama-3.2-1B-Instruct-4bit")
 
 ```
 SpecDiffTree/
-├── dts_implementation/          # S-ADT Implementation
-│   ├── core/
+├── dts_implementation/          # Core S-ADT Implementation
+│   ├── core/                   # Tree data structures
 │   │   ├── dts_node.py         # Tree nodes (MCTSNode, TokenNode)
 │   │   └── soft_bellman.py     # Soft Bellman backup
-│   ├── search/
-│   │   └── maxent_ts.py        # MaxEnt-TS algorithm (main)
-│   ├── rewards/
-│   │   └── spectral_reward.py  # Spectral reward function
-│   ├── utils/
+│   ├── search/                 # Search algorithms
+│   │   └── maxent_ts.py        # MaxEnt-TS (main algorithm)
+│   ├── rewards/                # Reward functions
+│   │   └── spectral_reward.py  # Spectral reward computation
+│   ├── models/                 # Model wrappers
+│   │   ├── pytorch_hf_wrapper.py   # PyTorch/HuggingFace
+│   │   ├── mlx_direct_loader.py    # MLX (Apple Silicon)
+│   │   └── opentslm_wrapper.py     # OpenTSLM integration
+│   ├── utils/                  # Utilities
 │   │   └── psd_utils.py        # Power Spectral Density
-│   ├── models/
-│   │   ├── local_loader.py     # PyTorch model wrapper
-│   │   ├── mlx_loader.py       # MLX model wrapper (Apple Silicon)
-│   │   ├── hf_loader.py        # HuggingFace loader
-│   │   └── opentslm_wrapper.py # OpenTSLM integration
-│   ├── examples/
-│   │   ├── simple_test.py      # Quick test
-│   │   ├── comprehensive_demo.py # Full demo
-│   │   └── sadt_mlx_demo.py    # MLX demo
-│   └── tests/
-│       └── test_integration.py # Integration tests
-├── src/                        # OpenTSLM components
+│   ├── examples/               # Example scripts
+│   └── tests/                  # Test suite
+│
+├── baselines/                  # Baseline Methods
+│   ├── mcts_baseline.py        # MCTS implementation
+│   ├── dts_baseline.py         # DTS implementation
+│   └── __init__.py
+│
+├── evaluation/                 # Evaluation Framework (NEW!)
+│   ├── comprehensive_evaluation.py  # Main evaluation script
+│   ├── compare_all_methods.py      # Method comparison
+│   ├── generate_ablation_figures.py # Figure generation
+│   └── run_*.py                     # Stage evaluations
+│
+├── experiments/                # Experiment Scripts (NEW!)
+│   ├── scripts/                # Bash scripts
+│   │   ├── run_parallel_evaluation.sh  # Parallel eval
+│   │   └── run_ablation_studies.sh     # Ablation studies
+│   └── logs/                   # Execution logs
+│
+├── src/                        # OpenTSLM Components
 │   ├── model/                  # Model architectures
 │   ├── time_series_datasets/   # Dataset loaders
+│   │   ├── m4/                 # M4 dataset
+│   │   ├── har_cot/            # HAR dataset
+│   │   └── simulation/         # Synthetic data
 │   └── prompt/                 # Prompt engineering
+│
+├── docs/                       # Documentation (Organized!)
+│   ├── guides/                 # User guides
+│   │   ├── COMPREHENSIVE_EVALUATION_GUIDE.md
+│   │   └── PARALLEL_EVALUATION_GUIDE.md
+│   ├── status/                 # Status reports
+│   │   └── BUG*.md            # Bug fixes
+│   ├── plans/                  # Session plans
+│   └── *.md                    # Method papers, summaries
+│
 ├── configs/                    # Configuration files
-│   └── mlx/                    # MLX-specific configs
-├── docs/                       # Documentation
-│   ├── S-ADT_FINAL_SUMMARY.md         # Complete methodology
-│   ├── M3_MAX_MLX_GUIDE.md            # M3 Max optimization
-│   ├── FINAL_STATUS.md                # Project status
-│   └── MaximumEntropyTreeSearchforAutoregressive.md  # Math
+├── data/                       # Datasets
+├── results/                    # Evaluation results
+├── wandb/                      # WandB logs
+│
+├── requirements.txt            # Python dependencies
+├── .gitignore                  # Git ignore patterns
+├── LICENSE.md                  # MIT License
+├── CITATION.cff                # Citation info
 └── README.md                   # This file
 ```
+
+**Key Directories:**
+- `dts_implementation/`: Core MaxEnt-TS algorithm
+- `evaluation/`: Comprehensive evaluation framework with 4 methods
+- `experiments/`: Scripts for parallel execution and ablation studies
+- `baselines/`: MCTS and DTS baseline implementations
+- `docs/`: Organized documentation (guides, status, plans)
+- `src/`: OpenTSLM integration and datasets
 
 ---
 

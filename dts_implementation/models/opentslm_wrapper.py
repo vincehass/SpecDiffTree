@@ -17,7 +17,7 @@ from typing import Optional, List, Dict, Tuple
 # Add OpenTSLM src to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from src.model.llm.OpenTSLM import OpenTSLM
+from src.model.llm.OpenTSLMSP import OpenTSLMSP
 from transformers import AutoTokenizer
 
 
@@ -54,18 +54,17 @@ class OpenTSLMWrapper:
         
         print(f"📥 Loading OpenTSLM from {repo_id}...")
         
-        # Load pre-trained model
-        self.model = OpenTSLM.load_pretrained(
-            repo_id,
-            device=device,
-            enable_lora=enable_lora
+        # Load pre-trained model (OpenTSLMSP)
+        self.model = OpenTSLMSP(
+            llm_id=repo_id,
+            device=device
         )
         self.model.eval()  # Set to evaluation mode
         
         # Get tokenizer
-        self.tokenizer = self.model.get_tokenizer()
-        self.eos_token = self.model.get_eos_token()
-        self.eos_token_id = self.tokenizer.encode(self.eos_token, add_special_tokens=False)[0]
+        self.tokenizer = self.model.tokenizer
+        self.eos_token = self.tokenizer.eos_token
+        self.eos_token_id = self.tokenizer.eos_token_id
         
         print(f"✅ Model loaded successfully!")
         print(f"   Device: {device}")

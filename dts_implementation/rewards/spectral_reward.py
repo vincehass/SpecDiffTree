@@ -15,7 +15,7 @@ where:
 
 import torch
 import numpy as np
-from typing import Optional, Dict, Callable
+from typing import Optional, Dict, Callable, Union
 import sys
 from pathlib import Path
 
@@ -61,6 +61,54 @@ class SpectralReward:
         # Cache for context PSD (computed once per batch)
         self.context_psd_cache = None
         self.context_freqs_cache = None
+    
+    def __call__(self, tokens_or_text):
+        """
+        Make SpectralReward callable for compatibility with baselines
+        
+        Args:
+            tokens_or_text: Can be tokens (list/tensor) or text (str) or numpy array
+        
+        Returns:
+            float: Reward value (simple heuristic for text, spectral for time series)
+        """
+        # Handle different input types
+        if isinstance(tokens_or_text, str):
+            # Text generation - use simple length-based reward
+            return float(min(len(tokens_or_text) / 100.0, 1.0))
+        
+        elif isinstance(tokens_or_text, (list, tuple)):
+            # Token list - convert to simple reward
+            return float(min(len(tokens_or_text) / 50.0, 1.0))
+        
+        elif torch.is_tensor(tokens_or_text):
+            # PyTorch tensor - could be tokens or time series
+            arr = tokens_or_text.cpu().numpy() if tokens_or_text.is_cuda or str(tokens_or_text.device) == 'mps' else tokens_or_text.numpy()
+            
+            # If it's a small tensor, treat as tokens
+            if arr.size < 10:
+                return float(min(arr.size / 50.0, 1.0))
+            
+            # If it looks like time series, use spectral reward
+            try:
+                result = self.compute_reward(arr)
+                return float(result['total_reward'])
+            except:
+                # Fallback to simple reward
+                return float(min(arr.size / 50.0, 1.0))
+        
+        elif isinstance(tokens_or_text, np.ndarray):
+            # Numpy array - assume time series
+            try:
+                result = self.compute_reward(tokens_or_text)
+                return float(result['total_reward'])
+            except:
+                # Fallback to simple reward
+                return float(min(tokens_or_text.size / 50.0, 1.0))
+        
+        else:
+            # Unknown type - return neutral reward
+            return 0.5
     
     def set_context(self, context_time_series: np.ndarray):
         """

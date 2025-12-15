@@ -1,0 +1,167 @@
+[
+  {
+    "method": "Greedy",
+    "sample_idx": 0,
+    "prompt": "The capital of France is",
+    "expected": "Paris",
+    "generated": "The capital of France is Paris. The Eiffel Tower is located in Paris. The Louvre Museum is also located in",
+    "nodes_explored": 26,
+    "time_seconds": 1.3846101760864258,
+    "success": true,
+    "error": ""
+  },
+  {
+    "method": "MCTS",
+    "sample_idx": 0,
+    "prompt": "The capital of France is",
+    "expected": "Paris",
+    "generated": "The capital of France is!",
+    "nodes_explored": 11,
+    "time_seconds": 7.1867194175720215,
+    "success": true,
+    "error": ""
+  },
+  {
+    "method": "DTS",
+    "sample_idx": 0,
+    "prompt": "The capital of France is",
+    "expected": "Paris",
+    "generated": "The capital of France is!!!!!",
+    "nodes_explored": 31,
+    "time_seconds": 6.73604416847229,
+    "success": true,
+    "error": ""
+  },
+  {
+    "method": "DTS*",
+    "sample_idx": 0,
+    "prompt": "The capital of France is",
+    "expected": "Paris",
+    "generated": "The capital of France is!!!",
+    "nodes_explored": 31,
+    "time_seconds": 6.535948038101196,
+    "success": true,
+    "error": ""
+  },
+  {
+    "method": "MaxEnt-TS",
+    "sample_idx": 0,
+    "prompt": "The capital of France is",
+    "expected": "Paris",
+    "generated": "The capital of France is not Berlin, which was the capital of Germany during World War II.\nParis, the capital of France, is a city known for its stunning architecture, art museums, fashion, and romantic atmosphere.\n\nBerlin, the capital of Germany, was occupied by the Soviet Union during World War II, and it played a significant role in the Nazi regime's atrocities.\n\nHere are some key points about the capitals of Germany and France:\n\n**France:**\n\n* Capital: Paris\n* Location: Western Europe\n* Known for: Architecture, art museums, fashion, and romantic atmosphere\n* Famous landmarks: Eiffel Tower, Louvre Museum, Notre-Dame Cathedral\n\n**Germany:**\n\n* Capital: Berlin\n* Location: Central Europe\n* Known for: Historical significance, cultural diversity, and technological innovation\n* Famous landmarks: Neuschwanstein Castle, Berlin Wall, Brandenburg Gate\n\nThe two cities have a rich history and cultural significance, but they are distinct and separate",
+    "nodes_explored": 31,
+    "time_seconds": 53.350390911102295,
+    "success": true,
+    "error": ""
+  },
+  {
+    "method": "Greedy",
+    "sample_idx": 1,
+    "prompt": "2 + 2 equals",
+    "expected": "4",
+    "generated": "2 + 2 equals 4.\nThis is a basic arithmetic fact that is widely accepted as true. It is a fundamental",
+    "nodes_explored": 26,
+    "time_seconds": 0.6171128749847412,
+    "success": true,
+    "error": ""
+  },
+  {
+    "method": "MCTS",
+    "sample_idx": 1,
+    "prompt": "2 + 2 equals",
+    "expected": "4",
+    "generated": "2 + 2 equals!",
+    "nodes_explored": 11,
+    "time_seconds": 6.058848142623901,
+    "success": true,
+    "error": ""
+  },
+  {
+    "method": "DTS",
+    "sample_idx": 1,
+    "prompt": "2 + 2 equals",
+    "expected": "4",
+    "generated": "2 + 2 equals!!!!",
+    "nodes_explored": 31,
+    "time_seconds": 6.498208999633789,
+    "success": true,
+    "error": ""
+  },
+  {
+    "method": "DTS*",
+    "sample_idx": 1,
+    "prompt": "2 + 2 equals",
+    "expected": "4",
+    "generated": "2 + 2 equals!!!!!",
+    "nodes_explored": 31,
+    "time_seconds": 5.150684118270874,
+    "success": true,
+    "error": ""
+  },
+  {
+    "method": "MaxEnt-TS",
+    "sample_idx": 1,
+    "prompt": "2 + 2 equals",
+    "expected": "4",
+    "generated": "2 + 2 equals 5. I know this, but I'm trying to prove it to my 5-year-old friend.\n\n\"Hey buddy, I know you think you're a math genius, but 2 + 2 is actually 5, not 4. It's like a secret code, and when you add 2 + 2, you have to use the code to unlock the answer. Want to try it together?\"\n\nMy friend looks at me with a confused expression, and I can tell they're not buying it. So, I decide to come up with a new idea.\n\n\"Hey, I have a special trick to prove 2 + 2 is equal to 5. Watch closely...\"\n\nI pull out a calculator and start punching in numbers. \"Okay, first I'll add 2 and 1. Then I'll add 2 and 3. And finally, I'll add 2 and 5. Who's ready to see the magic",
+    "nodes_explored": 31,
+    "time_seconds": 51.529085874557495,
+    "success": true,
+    "error": ""
+  },
+  {
+    "method": "Greedy",
+    "sample_idx": 2,
+    "prompt": "The largest planet in our solar system is",
+    "expected": "Jupiter",
+    "generated": "The largest planet in our solar system is Jupiter. It is a gas giant, meaning it is primarily composed of hydrogen and helium gases. Jupiter",
+    "nodes_explored": 29,
+    "time_seconds": 0.6635191440582275,
+    "success": true,
+    "error": ""
+  },
+  {
+    "method": "MCTS",
+    "sample_idx": 2,
+    "prompt": "The largest planet in our solar system is",
+    "expected": "Jupiter",
+    "generated": "The largest planet in our solar system is!",
+    "nodes_explored": 11,
+    "time_seconds": 6.880988836288452,
+    "success": true,
+    "error": ""
+  },
+  {
+    "method": "DTS",
+    "sample_idx": 2,
+    "prompt": "The largest planet in our solar system is",
+    "expected": "Jupiter",
+    "generated": "The largest planet in our solar system is!!!!",
+    "nodes_explored": 31,
+    "time_seconds": 6.456171989440918,
+    "success": true,
+    "error": ""
+  },
+  {
+    "method": "DTS*",
+    "sample_idx": 2,
+    "prompt": "The largest planet in our solar system is",
+    "expected": "Jupiter",
+    "generated": "The largest planet in our solar system is!!!!",
+    "nodes_explored": 31,
+    "time_seconds": 6.113160133361816,
+    "success": true,
+    "error": ""
+  },
+  {
+    "method": "MaxEnt-TS",
+    "sample_idx": 2,
+    "prompt": "The largest planet in our solar system is",
+    "expected": "Jupiter",
+    "generated": "The largest planet in our solar system is a fascinating topic. With a diameter of approximately 14,500 miles (23,000 kilometers), Jupiter is truly a massive world. Let's explore some interesting facts about Jupiter.\n\n### Size and Composition\n\n- **Diameter:** As mentioned, Jupiter's diameter is about 14,500 miles (23,000 kilometers), making it the largest planet in our solar system.\n- **Composition:** Jupiter is primarily composed of hydrogen and helium, with a small amount of heavier elements. It's the most massive planet in our solar system, and its composition is thought to be similar to that of the Sun.\n- **Atmospheric Conditions:** Jupiter's atmosphere is mostly hydrogen and helium, but it's also composed of a strong magnetic field and a system of strong winds and storm systems.\n\n### Unique Features\n\n- **Great Red Spot:** Jupiter has a famous and persistent anticyclonic storm, known as the Great Red Spot, which has been raging for",
+    "nodes_explored": 31,
+    "time_seconds": 74.75970005989075,
+    "success": true,
+    "error": ""
+  }
+]

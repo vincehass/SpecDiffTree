@@ -18,6 +18,7 @@ Algorithm Steps:
 
 import torch
 import numpy as np
+import time
 from typing import Optional, List, Dict, Tuple
 from dataclasses import dataclass
 import sys
@@ -74,7 +75,7 @@ class TokenNode(MCTSNode):
     
     def __init__(
         self,
-        token_ids: torch.Tensor,
+        token_ids,  # MLX array or torch.Tensor
         t: int,  # Sequence position (0 = start, T = end)
         parent: Optional['TokenNode'] = None,
         kv_cache: Optional[tuple] = None
@@ -153,18 +154,36 @@ class MaxEntTS:
             print(f"   Max sequence length: {config.max_seq_length}")
             print(f"   Spectral γ: {config.gamma}")
     
-    def initialize_root(self, prompt_tokens: torch.Tensor):
+    def initialize_root(self, prompt_tokens):
         """
         Initialize root node with prompt
         
         Args:
-            prompt_tokens: Initial token sequence [1, seq_len]
+            prompt_tokens: Initial token sequence (MLX array, torch.Tensor, or list)
         """
-        # Handle both 1D (MLX) and 2D (PyTorch) arrays
-        if hasattr(prompt_tokens, 'ndim') and prompt_tokens.ndim == 1:
+        import mlx.core as mx
+        import torch
+        
+        # Convert to proper format and get length
+        if isinstance(prompt_tokens, mx.array):
+            # MLX array - get from first dimension if 2D
+            if prompt_tokens.ndim == 2:
+                prompt_tokens = prompt_tokens[0]  # Get first row
             prompt_len = prompt_tokens.shape[0]
+        elif isinstance(prompt_tokens, torch.Tensor):
+            # PyTorch tensor - handle batch dimension
+            if prompt_tokens.dim() == 2:
+                # Remove batch dimension for tree search
+                prompt_tokens = prompt_tokens[0]
+            prompt_len = prompt_tokens.shape[0]
+        elif isinstance(prompt_tokens, list):
+            # Plain list - convert to 1D if nested
+            if len(prompt_tokens) > 0 and isinstance(prompt_tokens[0], list):
+                prompt_tokens = prompt_tokens[0]
+            prompt_len = len(prompt_tokens)
         else:
-            prompt_len = prompt_tokens.shape[-1]
+            # Generic array-like
+            prompt_len = prompt_tokens.shape[-1] if hasattr(prompt_tokens, 'shape') else len(prompt_tokens)
         
         self.root = TokenNode(
             token_ids=prompt_tokens,
@@ -174,10 +193,35 @@ class MaxEntTS:
         self.rollout_count = 0
         
         if self.config.verbose:
-            decoded = self.model.decode_sequence(prompt_tokens)[0]
+            # Decode for display - convert to list of ints
+            if isinstance(prompt_tokens, mx.array):
+                tokens_to_decode = prompt_tokens.tolist()
+            elif isinstance(prompt_tokens, torch.Tensor):
+                # Convert PyTorch tensor to list
+                tokens_to_decode = prompt_tokens.cpu().tolist()
+            elif isinstance(prompt_tokens, list):
+                tokens_to_decode = prompt_tokens
+            elif hasattr(prompt_tokens, 'tolist'):
+                tokens_to_decode = prompt_tokens.tolist()
+            else:
+                tokens_to_decode = list(prompt_tokens)
+            
+            # Ensure it's a flat list of ints (not nested)
+            if isinstance(tokens_to_decode, list) and len(tokens_to_decode) > 0:
+                if isinstance(tokens_to_decode[0], list):
+                    tokens_to_decode = tokens_to_decode[0]
+                # Convert to ints if needed
+                tokens_to_decode = [int(t) for t in tokens_to_decode]
+            
+            # Decode using tokenizer
+            try:
+                decoded = self.model.tokenizer.decode(tokens_to_decode) if hasattr(self.model.tokenizer, 'decode') else str(tokens_to_decode)
+            except Exception as e:
+                decoded = f"<decode error: {e}>"
+            
             print(f"\n🌱 Root initialized:")
-            print(f"   Prompt: '{decoded}'")
-            print(f"   Length: {prompt_tokens.shape[-1]} tokens")
+            print(f"   Prompt: '{decoded[:100]}{'...' if len(decoded) > 100 else ''}'")
+            print(f"   Length: {prompt_len} tokens")
     
     def select(self, node: TokenNode) -> TokenNode:
         """
@@ -259,27 +303,43 @@ class MaxEntTS:
         # Create children for top-k tokens
         children_created = []
         
-        for i in range(top_tokens.shape[1]):
-            token_id = top_tokens[0, i].item()
-            token_prob = top_probs[0, i].item()
+        # Handle both lists and tensors
+        if isinstance(top_tokens, list):
+            # Lists from MLX wrapper
+            tokens_list = top_tokens
+            probs_list = top_probs
+        else:
+            # Tensors from PyTorch
+            tokens_list = [top_tokens[0, i].item() for i in range(top_tokens.shape[1])]
+            probs_list = [top_probs[0, i].item() for i in range(top_probs.shape[1])]
+        
+        for token_id, token_prob in zip(tokens_list, probs_list):
             
             # Skip if already expanded
             if node.get_token_child(token_id) is not None:
                 continue
             
             # Create new token sequence
-            # Handle both MLX (1D) and PyTorch (2D) arrays
-            if hasattr(node.token_ids, 'ndim') and node.token_ids.ndim == 1:
-                # MLX 1D array - convert to list, append, convert back
-                import mlx.core as mx
+            # Handle both MLX and PyTorch arrays
+            import mlx.core as mx
+            
+            # Check if it's an MLX array
+            if isinstance(node.token_ids, mx.array):
+                # MLX array - convert to list, append, convert back
+                token_list = node.token_ids.tolist() if hasattr(node.token_ids, 'tolist') else list(node.token_ids)
+                token_list.append(token_id)
+                new_tokens = mx.array(token_list)
+            elif hasattr(node.token_ids, 'ndim') and node.token_ids.ndim == 1:
+                # 1D array (fallback) - convert to list, append, convert back to MLX
                 token_list = node.token_ids.tolist() if hasattr(node.token_ids, 'tolist') else list(node.token_ids)
                 token_list.append(token_id)
                 new_tokens = mx.array(token_list)
             else:
                 # PyTorch 2D tensor
+                device = node.token_ids.device if hasattr(node.token_ids, 'device') else 'cpu'
                 new_tokens = torch.cat([
                     node.token_ids,
-                    torch.tensor([[token_id]], device=node.token_ids.device)
+                    torch.tensor([[token_id]], device=device)
                 ], dim=1)
             
             # Create child node
@@ -318,7 +378,7 @@ class MaxEntTS:
         """
         # Check if already terminal
         if node.is_terminal(self.config.max_seq_length, self.model.eos_token_id):
-            return node.token_ids, self.model.decode_sequence(node.token_ids)[0]
+            return node.token_ids, self.model.decode_sequence(node.token_ids)
         
         # Generate remaining tokens
         # Handle both 1D (MLX) and 2D (PyTorch) arrays
@@ -337,7 +397,7 @@ class MaxEntTS:
             return_full_sequence=True
         )
         
-        decoded = self.model.decode_sequence(complete_sequence)[0]
+        decoded = self.model.decode_sequence(complete_sequence)
         
         return complete_sequence, decoded
     
@@ -392,6 +452,7 @@ class MaxEntTS:
     def search(
         self,
         prompt_tokens: torch.Tensor,
+        max_new_tokens: int = 200,
         ground_truth: Optional[Dict] = None
     ) -> Dict:
         """
@@ -408,18 +469,23 @@ class MaxEntTS:
         3. Return best sequence
         
         Args:
-            prompt_tokens: Initial prompt [1, seq_len]
+            prompt_tokens: Initial prompt [1, seq_len] or [seq_len]
+            max_new_tokens: Maximum new tokens to generate (default: 200)
             ground_truth: Optional ground truth for evaluation
         
         Returns:
             Dict with:
+                - best_node: Best node from tree
                 - best_sequence: Best token sequence
-                - best_text: Decoded text
-                - best_reward: Reward value
+                - best_value: Soft value estimate
                 - tree_stats: Tree statistics
         """
+        # Store max_new_tokens for use in rollouts
+        self.max_new_tokens = max_new_tokens
+        
         # Initialize
         self.initialize_root(prompt_tokens)
+        start_time = time.time()
         
         if self.config.verbose:
             print(f"\n🔍 Starting search with {self.config.num_rollouts} rollouts...")
@@ -460,11 +526,15 @@ class MaxEntTS:
             print(f"   Best reward: {best_reward:.4f}")
             print(f"   Best output: '{best_text[:100]}...'")
         
+        # Get tree stats and add time
+        tree_stats = self._get_tree_stats()
+        tree_stats['time'] = time.time() - start_time
+        
         return {
             'best_sequence': best_sequence,
             'best_text': best_text,
             'best_reward': best_reward,
-            'tree_stats': self._get_tree_stats()
+            'tree_stats': tree_stats
         }
     
     def _extract_best_path(self) -> Tuple[torch.Tensor, str, float]:
@@ -489,7 +559,8 @@ class MaxEntTS:
             complete_seq, decoded = self.rollout(current)
         else:
             complete_seq = current.token_ids
-            decoded = self.model.decode_sequence(complete_seq)[0]
+            # decode_sequence returns a string, not a list - don't index it!
+            decoded = self.model.decode_sequence(complete_seq)
         
         reward = current.value_est
         
