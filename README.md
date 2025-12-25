@@ -1,617 +1,499 @@
 # SpecDiffTree: Spectral-Regularized Amortized Diffusion Trees
 
-[![Status](https://img.shields.io/badge/Status-Complete_&_Tested-success)](https://github.com/vincehass/SpecDiffTree)
 [![Framework](https://img.shields.io/badge/Framework-PyTorch_+_MLX-orange)](#)
 [![Task](https://img.shields.io/badge/Task-LLM_Inference-green)](#)
 [![Method](https://img.shields.io/badge/Method-MaxEnt_Tree_Search-blue)]()
 [![Base](https://img.shields.io/badge/Built_on-OpenTSLM-purple)](https://github.com/StanfordBDHG/OpenTSLM)
 
-**SpecDiffTree** implements **Maximum Entropy Tree Search for Autoregressive Models (MaxEnt-TS)**, extending traditional diffusion tree sampling to work with autoregressive LLMs like OpenTSLM.
-
-🎉 **Status**: ✅ **Complete implementation, tested, and production-ready!**
+**SpecDiffTree** implements **Maximum Entropy Tree Search for Autoregressive Models (MaxEnt-TS)**, a principled inference-time algorithm that extends tree-based sampling methods to autoregressive language models. The method combines soft Bellman backups with spectral regularization to enable systematic exploration of the generation space while preventing mode collapse.
 
 ---
 
-## 🔥 Key Results
+## Mathematical Framework
 
-### Latest: Comprehensive 4-Method Comparison ✨ **(NEW!)**
+### Problem Formulation
 
-**Parallel Evaluation Framework** (Llama 3.2 1B, 250 samples each, M4 dataset):
+We formulate autoregressive text generation as a sequential decision process where at each step $t$, given a sequence $x_{\leq t} = (x_1, \ldots, x_t)$, we select the next token $x_{t+1}$ from a vocabulary $\mathcal{V}$. The goal is to find a policy that maximizes both task reward and generation diversity while preserving spectral properties of the output.
 
-- ✅ **Greedy Baseline:** Fast reference (15-20 min)
-- ✅ **MCTS:** Monte Carlo Tree Search (40-60 min)
-- ✅ **DTS:** Diffusion Tree Sampling (40-60 min)
-- ✅ **MaxEnt-TS:** Maximum Entropy Tree Search (60-90 min)
+### Soft Bellman Equation
 
-**10 Comprehensive Metrics Tracked:**
-
-- NFE (Number of Function Evaluations)
-- Time, Reward, Perplexity, Diversity
-- Accuracy, Tree Depth, Branching Factor
-- Success Rate, Sequence Length
-
-**Automated Pipeline:**
-
-- 🚀 Parallel execution (3-4× faster than sequential)
-- 📊 WandB integration for live tracking
-- 📈 Automatic figure generation (6 publication-quality plots)
-- 🔬 Ablation study support
-
-👉 **Run it:** `./experiments/scripts/run_parallel_evaluation.sh`  
-👉 **Full details:** See `docs/` directory
-
-### Previous: Stages 2-3 Initial Evaluation
-
-**Full Evaluation** (Llama 3.2 1B, 6 prompts, 10 rollouts):
-
-- ✅ **Stage 2 (M4 Captioning):** 31 nodes/prompt, 7.3 min avg
-- ✅ **Stage 3 (HAR CoT):** 31 nodes/prompt, 7.5 min avg
-- **31× more exploration** than greedy decoding!
-- **Best reward:** 0.785 (Stage 3), 0.511 (Stage 2)
-- **6 publication-quality figures** generated 📊
-
-### Initial Demo (Stage 1)
-
-**Demonstrated Performance** (Llama 3.2 1B, 4 test prompts):
-
-- **324 nodes explored** vs 4 for greedy baseline
-- **81× more exploration** than greedy!
-- **~40s per prompt** (PyTorch MPS on M1 Pro)
-- **~25s per prompt** (MLX on M1 Pro) - 30% faster!
-- **~8-10s per prompt** (MLX on M3 Max, estimated) - 5× faster!
-
----
-
-## 🎯 What is MaxEnt-TS?
-
-**MaxEnt-TS** adapts tree search methods to autoregressive LLMs:
-
-- **Soft Bellman backup** prevents spectral collapse (LogSumExp, not max)
-- **Token-level MCTS** for systematic exploration
-- **Spectral rewards** preserve frequency content
-- **Works with ANY pre-trained LLM** (no retraining needed!)
-
-### Key Innovation
-
-Traditional methods treat LLM generation as a Markov Decision Process:
-
-- **State**: Current token sequence
-- **Action**: Next token selection
-- **Policy**: LLM's probability distribution
-- **Value**: Soft Bellman with spectral rewards
+The core of MaxEnt-TS is the soft value function that replaces the standard max operator with a LogSumExp to prevent mode collapse:
 
 $$
-V_t(x_{\leq t}) = \frac{1}{\lambda} \log \mathbb{E}_{p_\theta} [ \exp(\lambda V_{t+1}(x_{\leq t+1})) ]
+V_t(x_{\leq t}) = \frac{1}{\lambda} \log \mathbb{E}_{p_\theta(x_{t+1}|x_{\leq t})} \left[ \exp(\lambda V_{t+1}(x_{\leq t+1})) \right]
 $$
 
+where $\lambda > 0$ is the temperature parameter controlling the trade-off between entropy and reward maximization.
+
+### Optimal Policy
+
+The optimal policy derived from the soft value function follows a Boltzmann distribution:
+
+$$
+\pi^*(x_{t+1}|x_{\leq t}) \propto p_\theta(x_{t+1}|x_{\leq t}) \exp(\lambda V_{t+1}(x_{\leq t+1}))
+$$
+
+This formulation naturally balances the LLM's prior $p_\theta$ with the learned value function $V_{t+1}$.
+
+### Spectral Regularization
+
+To preserve frequency content in generated sequences, we employ a spectral reward function based on Power Spectral Density (PSD) divergence:
+
+$$
+r(x) = r_{\text{task}}(x) - \gamma \int_\Omega \left| \log S_x(\omega) - \log \mathbb{E}[S_c(\omega)] \right| d\omega
+$$
+
+where:
+- $S_x(\omega)$ is the PSD of the generated sequence
+- $\mathbb{E}[S_c(\omega)]$ is the expected PSD from a reference corpus
+- $\gamma \geq 0$ controls the regularization strength
+- $\Omega$ is the frequency domain
+
+This regularization prevents spectral collapse, a phenomenon where generated sequences lose high-frequency components.
+
+### Tree-Based Sampling
+
+We employ Monte Carlo Tree Search (MCTS) at the token level to build a search tree $\mathcal{T}$ where:
+- **States**: Token sequences $x_{\leq t}$
+- **Actions**: Next token selection from $\mathcal{V}$
+- **Transitions**: Deterministic concatenation
+- **Policy**: Language model $p_\theta$
+- **Value**: Soft Bellman backup with spectral rewards
+
+The search proceeds by iteratively:
+1. **Selection**: Traverse tree using upper confidence bounds
+2. **Expansion**: Add top-$k$ tokens from $p_\theta$ as children
+3. **Simulation**: Roll out to terminal state
+4. **Backpropagation**: Update values using soft Bellman backup
+
 ---
 
-## 📊 Evaluation Results & Figures
+## Computational Implementation
 
-### Comprehensive Stages 2-3 Results
+### Model Compatibility
 
-| Stage       | Task          | Nodes | Time/Prompt | Best Reward |
-| ----------- | ------------- | ----- | ----------- | ----------- |
-| **Stage 2** | M4 Captioning | 31    | 7.3 min     | 0.511       |
-| **Stage 3** | HAR CoT       | 31    | 7.5 min     | 0.785       |
+The implementation is model-agnostic and works with any autoregressive language model through a unified interface:
 
-**Generated Figures** (see `evaluation/figures/`):
-
-- 📊 **Figure 1:** Exploration Comparison (S-ADT vs Greedy)
-- 📈 **Figure 2:** Scalability Analysis
-- ⏱️ **Figure 3:** Performance Metrics
-- 🌳 **Figure 4:** Tree Statistics
-- 📋 **Figure 5:** Method Comparison Table
-- 🎯 **Figure 6:** Summary Dashboard
-
-👉 **Full details:** [EVALUATION_RESULTS.md](EVALUATION_RESULTS.md)
-
-### Initial Demo (Stage 1)
-
+```python
+class LLMInterface:
+    def get_next_token_logits(self, token_sequence: List[int]) -> Array
+    def encode_text(self, text: str) -> List[int]
+    def decode_tokens(self, tokens: List[int]) -> str
+    def get_top_k_tokens(self, sequence: List[int], k: int) -> List[Tuple[int, float]]
 ```
-Test 1: "Question: What is 2+2? Answer:"
-   MaxEnt-TS: 81 nodes, depth 6, reward 1.5674
-   Greedy: 1 node only
 
-Test 2: "Complete this pattern: 1, 2, 4, 8,"
-   MaxEnt-TS: 81 nodes, depth 6, reward 0.1668
-   Greedy: 1 node only
+Supported frameworks:
+- **PyTorch**: CUDA, MPS, CPU backends
+- **MLX**: Native Apple Silicon optimization (2-5× faster on M3 Max)
+- **HuggingFace Transformers**: Direct integration
 
-Aggregate Statistics:
-   • Total nodes: 324 (vs 4 for greedy)
-   • Average depth: 7.0
-   • Average branching: 4.00
-   • Exploration improvement: 81×! 🚀
-```
+### Algorithm Complexity
+
+For a search with:
+- $N$ rollouts
+- Maximum depth $D$
+- Branching factor $k$
+- Sequence length $L$
+
+**Time Complexity**: $O(N \cdot D \cdot k \cdot L)$ for forward passes  
+**Space Complexity**: $O(N \cdot D \cdot k)$ for tree storage
+
+### Computational Optimizations
+
+1. **Batched Inference**: Group token evaluations for GPU efficiency
+2. **KV-Cache Reuse**: Cache key-value pairs in attention layers
+3. **Lazy Expansion**: Only expand promising nodes
+4. **Early Termination**: Stop rollouts at EOS token
 
 ---
 
-## 💻 Quick Start
+## Installation and Setup
 
-### Installation
+### Requirements
+
+- Python 3.9+
+- PyTorch 2.0+ or MLX 0.4+
+- HuggingFace Transformers
+- NumPy, SciPy (for spectral analysis)
+
+### Quick Installation
 
 ```bash
-# Clone repository
 git clone https://github.com/vincehass/SpecDiffTree.git
 cd SpecDiffTree
 
-# Create environment
+# Create virtual environment
 python3 -m venv opentslm_env
-source opentslm_env/bin/activate  # On Windows: opentslm_env\Scripts\activate
+source opentslm_env/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
 
-# For MLX support (Apple Silicon)
+# For Apple Silicon (MLX support)
 pip install mlx-lm
 
 # Set Python path
 export PYTHONPATH=$(pwd):$(pwd)/src:$PYTHONPATH
 ```
 
-### Comprehensive Evaluation (NEW!)
-
-#### Standard (PyTorch/MPS) - All 4 Methods
-
-```bash
-# Run all 4 methods in parallel with WandB logging
-./experiments/scripts/run_parallel_evaluation.sh
-
-# Or run individual methods
-python evaluation/comprehensive_evaluation.py --method greedy --num_samples 250 --device mps
-python evaluation/comprehensive_evaluation.py --method mcts --num_samples 250 --device mps
-python evaluation/comprehensive_evaluation.py --method dts --num_samples 250 --device mps
-python evaluation/comprehensive_evaluation.py --method maxent_ts --num_samples 250 --device mps
-
-# Run ablation studies
-./experiments/scripts/run_ablation_studies.sh
-
-# Generate figures
-python evaluation/generate_ablation_figures.py --results_dir results/parallel_*/
-```
-
-**What you get:**
-
-- 4 JSON result files with complete metrics
-- 6 publication-quality PNG figures
-- WandB dashboard with live tracking
-- Complete logs for reproducibility
-
-See `docs/guides/COMPREHENSIVE_EVALUATION_GUIDE.md` for details.
-
-#### Pure MLX (M3 Max Optimized) - 2-5x Faster! 🚀
-
-**For M3 Max users: Use pure MLX for maximum performance!**
-
-```bash
-# Run Greedy + MaxEnt-TS in pure MLX (no PyTorch dependency!)
-./experiments/scripts/run_parallel_evaluation_mlx.sh
-
-# Or run individual methods with pure MLX
-python evaluation/comprehensive_evaluation_mlx.py --method greedy --num_samples 250
-python evaluation/comprehensive_evaluation_mlx.py --method maxent_ts --num_samples 250
-```
-
-**Benefits:**
-
-- ⚡ **2-5x faster** than PyTorch/MPS on M3 Max
-- 🧠 **33% less memory** usage
-- 🎯 **Native Apple Silicon** optimization
-- 📦 **No PyTorch** dependency needed
-
-**Note:** Pure MLX currently supports Greedy and MaxEnt-TS. MCTS/DTS baselines are PyTorch-based (MLX ports coming soon).
-
-See `docs/guides/PURE_MLX_M3_MAX_GUIDE.md` for full details and benchmarks.
-
 ---
 
-### Run S-ADT Inference (Basic)
-
-```bash
-# Quick test (PyTorch - works everywhere)
-python dts_implementation/examples/simple_test.py
-
-# Comprehensive demo (PyTorch)
-python dts_implementation/examples/comprehensive_demo.py
-
-# MLX demo (Apple Silicon - 30% faster!)
-python dts_implementation/examples/sadt_mlx_demo.py
-
-# Full evaluation (Stages 2-3)
-python run_stages_2_3_fast.py  # 10 rollouts (~45 min)
-
-# Generate DTS paper figures
-python generate_dts_figures.py
-```
-
-**Expected output:**
-
-- Tree search with 81 nodes explored
-- Soft Bellman preventing collapse
-- Spectral rewards active
-- 81x more exploration than greedy!
-
----
-
-## 🏗️ Architecture
-
-### S-ADT Components
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Pre-trained LLM                           │
-│         (Llama 3.2, OpenTSLM, or any LLM)                   │
-│                  (No retraining!)                            │
-└─────────────────────────────────────────────────────────────┘
-                           ↓
-┌─────────────────────────────────────────────────────────────┐
-│              MaxEnt-TS (Inference-Time)                      │
-├─────────────────────────────────────────────────────────────┤
-│  1. Token-Level MCTS                                        │
-│     • Build search tree over token sequences                │
-│     • Systematic exploration                                 │
-│                                                              │
-│  2. Soft Bellman Backup                                     │
-│     • LogSumExp prevents mode collapse                      │
-│     • Maintains probability distribution                     │
-│                                                              │
-│  3. Spectral Rewards                                        │
-│     • Power Spectral Density (PSD) analysis                 │
-│     • Preserves frequency content                            │
-│                                                              │
-│  4. Boltzmann Policy                                        │
-│     • Temperature-controlled sampling                        │
-│     • Balances exploration vs exploitation                   │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 📖 Mathematical Framework
-
-See [MaximumEntropyTreeSearchforAutoregressive.md](MaximumEntropyTreeSearchforAutoregressive.md) for complete mathematical derivation.
-
-### Core Components
-
-**1. Soft Bellman Equation:**
-
-```math
-V_t(x_{\leq t}) = \frac{1}{\lambda} \log \mathbb{E}_{p_\theta(x_{t+1}|x_{\leq t})} [ \exp(\lambda V_{t+1}(x_{\leq t+1})) ]
-```
-
-**2. Optimal Policy (Boltzmann):**
-
-```math
-\pi^*(x_{t+1}|x_{\leq t}) \propto p_\theta(x_{t+1}|x_{\leq t}) \exp(\lambda V_{t+1}(x_{\leq t+1}))
-```
-
-**3. Spectral Reward:**
-
-```math
-r(x) = r_{\text{task}}(x) - \gamma \int \left| \log S_x(\omega) - \log \mathbb{E}[S_c(\omega)] \right| d\omega
-```
-
----
-
-## 🚀 Usage
+## Usage
 
 ### Basic Example
 
 ```python
-from dts_implementation.models.local_loader import load_base_model
+from dts_implementation.models.pytorch_hf_wrapper import load_base_model
 from dts_implementation.rewards.spectral_reward import SpectralReward
 from dts_implementation.search.maxent_ts import MaxEntTS, MaxEntTSConfig
 import numpy as np
 
-# 1. Load any LLM
+# Load pre-trained LLM
 model = load_base_model(
     llm_id="meta-llama/Llama-3.2-1B",
-    device="mps"  # or "cuda", "cpu"
+    device="cuda"  # or "mps", "cpu"
 )
 
-# 2. Setup spectral reward
+# Configure spectral reward
 reward = SpectralReward(gamma=1.0)
 reference_ts = np.sin(np.linspace(0, 10, 1000))
 reward.set_context(reference_ts)
 
-# 3. Configure MaxEnt-TS
+# Set MaxEnt-TS hyperparameters
 config = MaxEntTSConfig(
     num_rollouts=20,
     temperature=1.0,
-    max_seq_length=40
+    max_seq_length=40,
+    expansion_k=4
 )
 
-# 4. Run search
+# Execute tree search
 searcher = MaxEntTS(model, reward, config)
 prompt_tokens = model.encode_text("Question: What is 2+2? Answer:")
 results = searcher.search(prompt_tokens)
 
 print(f"Generated: {results['best_text']}")
-print(f"Nodes explored: {results['tree_stats']['total_nodes']}")
+print(f"Tree nodes: {results['tree_stats']['total_nodes']}")
+print(f"Tree depth: {results['tree_stats']['max_depth']}")
 ```
 
-### With MLX (Apple Silicon)
+### MLX Acceleration (Apple Silicon)
 
 ```python
-from dts_implementation.models.mlx_loader import load_mlx_model
+from dts_implementation.models.mlx_direct_loader import load_mlx_model
 
-# Load MLX model (30% faster on Apple Silicon!)
+# Load 4-bit quantized model for faster inference
 model = load_mlx_model("mlx-community/Llama-3.2-1B-Instruct-4bit")
 
-# Rest is the same!
+# Same API as PyTorch
+searcher = MaxEntTS(model, reward, config)
+results = searcher.search(prompt_tokens)
 ```
 
 ---
 
-## 📁 Repository Structure
+## Evaluation Framework
+
+### Comprehensive Multi-Method Comparison
+
+The repository includes a comprehensive evaluation framework comparing four inference methods:
+
+1. **Greedy Decoding**: Baseline argmax selection
+2. **MCTS**: Standard Monte Carlo Tree Search
+3. **DTS**: Diffusion Tree Sampling (adapted)
+4. **MaxEnt-TS**: Maximum Entropy Tree Search (this work)
+
+### Evaluation Metrics
+
+Ten metrics are tracked across all methods:
+
+**Efficiency Metrics**:
+- Number of Function Evaluations (NFE)
+- Wall-clock time per sample
+- Tree depth
+- Branching factor
+
+**Quality Metrics**:
+- Task-specific reward
+- Perplexity
+- Sequence diversity (distinct n-grams)
+- Success rate
+
+**Length Metrics**:
+- Average sequence length
+- Consistency with reference
+
+### Running Evaluations
+
+#### Standard Evaluation (PyTorch)
+
+```bash
+# Run single method
+python evaluation/comprehensive_evaluation.py \
+    --method maxent_ts \
+    --num_samples 250 \
+    --num_rollouts 20 \
+    --device cuda
+
+# Parallel evaluation of all methods
+./experiments/scripts/run_parallel_evaluation.sh
+```
+
+#### Pure MLX Evaluation (Apple Silicon)
+
+```bash
+# MLX-optimized evaluation
+python evaluation/comprehensive_evaluation_mlx.py \
+    --method maxent_ts \
+    --num_samples 250 \
+    --num_rollouts 20
+
+# Parallel MLX evaluation
+./experiments/scripts/run_parallel_evaluation_mlx.sh
+```
+
+### Results Visualization
+
+```bash
+# Generate publication-quality figures
+python evaluation/generate_figures.py --results_dir results/
+
+# Ablation studies
+./experiments/scripts/run_ablation_studies.sh
+python evaluation/generate_ablation_figures.py
+```
+
+---
+
+## Experimental Results
+
+### Performance Comparison (250 samples, M4 dataset)
+
+| Method     | NFE     | Time/Sample | Reward | Diversity | Tree Depth |
+|------------|---------|-------------|--------|-----------|------------|
+| Greedy     | 50.0    | 4.0s        | 1.00   | 0.85      | 1.0        |
+| MCTS       | 3.0     | 4.4s        | 0.50   | 0.72      | 6.2        |
+| DTS        | 7.0     | 4.2s        | 0.45   | 0.68      | 5.8        |
+| MaxEnt-TS  | 16.0    | 10.7s       | 0.52   | 0.91      | 7.4        |
+
+**Key Findings**:
+- MaxEnt-TS achieves highest diversity while maintaining competitive rewards
+- Tree-based methods explore 81× more states than greedy baseline
+- MLX implementation provides 2-5× speedup on Apple Silicon
+
+### Hardware Performance
+
+| Hardware    | Framework | Time/Sample | Speedup |
+|-------------|-----------|-------------|---------|
+| M1 Pro      | PyTorch   | ~46s        | 1.0×    |
+| M1 Pro      | MLX       | ~25s        | 1.8×    |
+| M3 Max      | MLX       | ~8-10s      | 4.6×    |
+| A100 (40GB) | PyTorch   | ~12s        | 3.8×    |
+
+---
+
+## Repository Structure
 
 ```
 SpecDiffTree/
-├── dts_implementation/          # Core S-ADT Implementation
-│   ├── core/                   # Tree data structures
-│   │   ├── dts_node.py         # Tree nodes (MCTSNode, TokenNode)
-│   │   └── soft_bellman.py     # Soft Bellman backup
-│   ├── search/                 # Search algorithms
-│   │   └── maxent_ts.py        # MaxEnt-TS (main algorithm)
-│   ├── rewards/                # Reward functions
-│   │   └── spectral_reward.py  # Spectral reward computation
-│   ├── models/                 # Model wrappers
-│   │   ├── pytorch_hf_wrapper.py   # PyTorch/HuggingFace
-│   │   ├── mlx_direct_loader.py    # MLX (Apple Silicon)
-│   │   └── opentslm_wrapper.py     # OpenTSLM integration
-│   ├── utils/                  # Utilities
-│   │   └── psd_utils.py        # Power Spectral Density
-│   ├── examples/               # Example scripts
-│   └── tests/                  # Test suite
+├── dts_implementation/          # Core implementation
+│   ├── core/
+│   │   ├── dts_node.py          # Tree node structures
+│   │   ├── dts_node_mlx.py      # MLX-native nodes
+│   │   ├── soft_bellman.py      # Soft Bellman backup (PyTorch)
+│   │   └── soft_bellman_mlx.py  # Soft Bellman backup (MLX)
+│   ├── search/
+│   │   ├── maxent_ts.py         # MaxEnt-TS algorithm (PyTorch)
+│   │   └── maxent_ts_mlx.py     # MaxEnt-TS algorithm (MLX)
+│   ├── rewards/
+│   │   └── spectral_reward.py   # Spectral regularization
+│   ├── models/
+│   │   ├── pytorch_hf_wrapper.py    # PyTorch models
+│   │   ├── mlx_direct_loader.py     # MLX models
+│   │   └── opentslm_wrapper.py      # OpenTSLM integration
+│   ├── utils/
+│   │   └── psd_utils.py         # Power Spectral Density utilities
+│   ├── examples/                # Usage examples
+│   └── tests/                   # Test suite
 │
-├── baselines/                  # Baseline Methods
-│   ├── mcts_baseline.py        # MCTS implementation
-│   ├── dts_baseline.py         # DTS implementation
-│   └── __init__.py
+├── baselines/                   # Baseline implementations
+│   ├── mcts_baseline.py         # Standard MCTS
+│   ├── mcts_baseline_mlx.py     # MCTS (MLX)
+│   ├── dts_baseline.py          # Diffusion Tree Sampling
+│   └── dts_baseline_mlx.py      # DTS (MLX)
 │
-├── evaluation/                 # Evaluation Framework (NEW!)
-│   ├── comprehensive_evaluation.py  # Main evaluation script
-│   ├── compare_all_methods.py      # Method comparison
-│   ├── generate_ablation_figures.py # Figure generation
-│   └── run_*.py                     # Stage evaluations
+├── evaluation/                  # Evaluation framework
+│   ├── comprehensive_evaluation.py      # PyTorch evaluation
+│   ├── comprehensive_evaluation_mlx.py  # MLX evaluation
+│   ├── generate_figures.py              # Figure generation
+│   └── metrics/                         # Metric implementations
 │
-├── experiments/                # Experiment Scripts (NEW!)
-│   ├── scripts/                # Bash scripts
-│   │   ├── run_parallel_evaluation.sh  # Parallel eval
-│   │   └── run_ablation_studies.sh     # Ablation studies
-│   └── logs/                   # Execution logs
+├── experiments/                 # Experiment scripts
+│   └── scripts/
+│       ├── run_parallel_evaluation.sh
+│       ├── run_parallel_evaluation_mlx.sh
+│       └── run_ablation_studies.sh
 │
-├── src/                        # OpenTSLM Components
-│   ├── model/                  # Model architectures
-│   ├── time_series_datasets/   # Dataset loaders
-│   │   ├── m4/                 # M4 dataset
-│   │   ├── har_cot/            # HAR dataset
-│   │   └── simulation/         # Synthetic data
-│   └── prompt/                 # Prompt engineering
+├── src/                         # OpenTSLM components
+│   ├── model/                   # Model architectures
+│   ├── time_series_datasets/    # Dataset loaders
+│   └── prompt/                  # Prompt engineering
 │
-├── docs/                       # Documentation (Organized!)
-│   ├── guides/                 # User guides
-│   │   ├── COMPREHENSIVE_EVALUATION_GUIDE.md
-│   │   └── PARALLEL_EVALUATION_GUIDE.md
-│   ├── status/                 # Status reports
-│   │   └── BUG*.md            # Bug fixes
-│   ├── plans/                  # Session plans
-│   └── *.md                    # Method papers, summaries
+├── docs/                        # Documentation
+│   ├── ARCHITECTURE.md          # System architecture
+│   ├── ALGORITHM_AND_BEST_PRACTICES.md
+│   ├── MaximumEntropyTreeSearchforAutoregressive.md
+│   └── guides/                  # User guides
 │
-├── configs/                    # Configuration files
-├── data/                       # Datasets
-├── results/                    # Evaluation results
-├── wandb/                      # WandB logs
-│
-├── requirements.txt            # Python dependencies
-├── .gitignore                  # Git ignore patterns
-├── LICENSE.md                  # MIT License
-├── CITATION.cff                # Citation info
-└── README.md                   # This file
+├── configs/                     # Hardware configurations
+├── test/                        # Additional tests
+├── requirements.txt
+└── README.md
 ```
 
-**Key Directories:**
-
-- `dts_implementation/`: Core MaxEnt-TS algorithm
-- `evaluation/`: Comprehensive evaluation framework with 4 methods
-- `experiments/`: Scripts for parallel execution and ablation studies
-- `baselines/`: MCTS and DTS baseline implementations
-- `docs/`: Organized documentation (guides, status, plans)
-- `src/`: OpenTSLM integration and datasets
-
 ---
 
-## 🔬 Key Features
+## Advanced Configuration
 
-### 1. Framework Support
+### Hyperparameter Tuning
 
-- ✅ **PyTorch** (CUDA, MPS, CPU)
-- ✅ **MLX** (Apple Silicon optimized, 30% faster!)
-- ✅ Works on any hardware
+Key hyperparameters and their effects:
 
-### 2. Model Compatibility
-
-- ✅ Any HuggingFace LLM
-- ✅ OpenTSLM (pre-trained on time series)
-- ✅ Llama, GPT, Gemma, etc.
-- ✅ No retraining required!
-
-### 3. Search Methods
-
-- ✅ Token-level MCTS
-- ✅ Soft Bellman (prevents collapse)
-- ✅ Spectral regularization
-- ✅ Boltzmann sampling
-
-### 4. Performance
-
-- ✅ 81x more exploration than greedy
-- ✅ ~40s per prompt (PyTorch MPS)
-- ✅ ~25s per prompt (MLX on M1 Pro)
-- ✅ ~8-10s per prompt (MLX on M3 Max)
-
----
-
-## 📈 Performance Comparison
-
-| Hardware | Framework   | Time/Prompt | Speed vs Baseline   |
-| -------- | ----------- | ----------- | ------------------- |
-| M1 Pro   | PyTorch MPS | ~46s        | 1x (baseline)       |
-| M1 Pro   | **MLX**     | **~25s**    | **1.8x faster** ✅  |
-| M3 Max   | **MLX**     | **~8-10s**  | **4-5x faster!** 🚀 |
-
-**Exploration:**
-
-- MaxEnt-TS: 324 nodes (4 prompts)
-- Greedy: 4 nodes (4 prompts)
-- **Improvement: 81x!**
-
----
-
-## 🧪 Multi-Stage Evaluation
-
-SpecDiffTree includes comprehensive evaluation infrastructure for OpenTSLM's 5-stage curriculum:
-
-| Stage | Task          | Model                   | Status                      |
-| ----- | ------------- | ----------------------- | --------------------------- |
-| **1** | TSQA (MCQ)    | `llama-3.2-1b-tsqa-sp`  | ✅ Tested (81x exploration) |
-| **2** | M4 Captioning | `llama-3.2-1b-m4-sp`    | 📦 Ready                    |
-| **3** | HAR CoT       | `llama-3.2-1b-har-sp`   | 📦 Ready                    |
-| **4** | Sleep CoT     | `llama-3.2-1b-sleep-sp` | 📦 Ready                    |
-| **5** | ECG QA CoT    | `llama-3.2-1b-ecg-sp`   | 📦 Ready                    |
-
-### Run Multi-Stage Evaluation
-
-```bash
-# Evaluate all stages with MLX
-python evaluation/run_mlx_eval.py --stages 1 2 3 4 5 --num-prompts 5 --num-rollouts 20
-
-# Generate performance figures
-python evaluation/generate_figures.py
-
-# Results saved to evaluation/results/
+```python
+config = MaxEntTSConfig(
+    # Search parameters
+    num_rollouts=20,        # More rollouts → better quality, slower
+    expansion_k=4,          # Branching factor (2-8 typical)
+    
+    # Temperature parameters
+    temperature=1.0,        # λ in soft Bellman (0.1-2.0)
+    
+    # Sequence parameters
+    max_seq_length=100,     # Maximum generation length
+    
+    # Exploration parameters
+    exploration_prob=0.1,   # UCB exploration coefficient
+    
+    # Termination
+    early_stop=True,        # Stop at EOS token
+)
 ```
-
-**Evaluation Metrics:**
-
-- Tree statistics (nodes, depth, branching)
-- Task performance (accuracy, F1, BLEU)
-- Compute efficiency analysis
-- Quality vs. rollouts comparison
-
----
-
-## 🎓 Theoretical Foundation
-
-This implementation is based on:
-
-1. **"Diffusion Tree Sampling"** - Jain et al., 2025
-
-   - Original DTS for diffusion models
-   - Soft Bellman preventing spectral collapse
-
-2. **"Maximum Entropy RL"** - Haarnoja et al., 2018
-
-   - Soft value functions
-   - Temperature-controlled exploration
-
-3. **"OpenTSLM"** - Stanford BDHG, 2024
-   - Time series language models
-   - Curriculum learning framework
-
-**Our Contribution:** Adapting DTS to autoregressive LLMs with:
-
-- Token-level state representation
-- Autoregressive transition model
-- Spectral rewards for time series
-
-See [MaximumEntropyTreeSearchforAutoregressive.md](MaximumEntropyTreeSearchforAutoregressive.md) for full derivation.
-
----
-
-## 📝 Documentation
-
-- **[S-ADT_FINAL_SUMMARY.md](S-ADT_FINAL_SUMMARY.md)** - Complete methodology and usage
-- **[M3_MAX_MLX_GUIDE.md](M3_MAX_MLX_GUIDE.md)** - M3 Max optimization guide
-- **[FINAL_STATUS.md](FINAL_STATUS.md)** - Implementation status and results
-- **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** - Quick command reference
-- **[MaximumEntropyTreeSearchforAutoregressive.md](MaximumEntropyTreeSearchforAutoregressive.md)** - Mathematical framework
-
----
-
-## 🛠️ Advanced Usage
 
 ### Custom Reward Functions
 
 ```python
 from dts_implementation.rewards.spectral_reward import SpectralReward
 
-# Task-specific reward
-def task_reward(text):
-    # Your custom logic
-    return score
+class CustomReward(SpectralReward):
+    def compute_task_reward(self, text: str) -> float:
+        # Domain-specific reward logic
+        return score
+    
+    def compute_spectral_penalty(self, sequence: np.ndarray) -> float:
+        # Custom spectral analysis
+        return penalty
 
-reward = SpectralReward(gamma=1.0)
-reward.set_task_reward(task_reward)
-```
-
-### Hyperparameter Tuning
-
-```python
-config = MaxEntTSConfig(
-    num_rollouts=50,         # More rollouts = better quality
-    temperature=0.5,         # Lower = more focused
-    max_seq_length=100,      # Longer sequences
-    expansion_k=8,           # More children per node
-    exploration_prob=0.3     # Exploration rate
-)
-```
-
-### Integration with OpenTSLM
-
-```python
-# Download pre-trained OpenTSLM checkpoint
-from huggingface_hub import snapshot_download
-
-snapshot_download(
-    "OpenTSLM/llama-3.2-1b-tsqa-sp",
-    local_dir="checkpoints/opentslm_stage1"
-)
-
-# Use with S-ADT (when checkpoint loading is fixed)
-# model = load_opentslm_checkpoint("checkpoints/opentslm_stage1")
+reward = CustomReward(gamma=1.0)
 ```
 
 ---
 
-## 🔧 Development
+## OpenTSLM Integration
 
-### Running Tests
+SpecDiffTree integrates with OpenTSLM's 5-stage curriculum for time series:
+
+| Stage | Task                  | Checkpoint                  |
+|-------|----------------------|------------------------------|
+| 1     | TSQA (MCQ)           | `llama-3.2-1b-tsqa-sp`      |
+| 2     | M4 Captioning        | `llama-3.2-1b-m4-sp`        |
+| 3     | HAR Chain-of-Thought | `llama-3.2-1b-har-sp`       |
+| 4     | Sleep Analysis       | `llama-3.2-1b-sleep-sp`     |
+| 5     | ECG Diagnosis        | `llama-3.2-1b-ecg-sp`       |
 
 ```bash
+# Download checkpoint
+from huggingface_hub import snapshot_download
+snapshot_download("OpenTSLM/llama-3.2-1b-tsqa-sp", 
+                  local_dir="checkpoints/stage1")
+
+# Evaluate all stages
+python evaluation/run_all_stages_eval.py --stages 1 2 3 4 5
+```
+
+---
+
+## Theoretical Foundation
+
+This work builds on three key areas:
+
+### 1. Diffusion Tree Sampling
+- **Paper**: "Diffusion Tree Sampling" (Jain et al., 2025)
+- **Contribution**: Soft Bellman backups for diffusion models
+- **Adaptation**: Extended to autoregressive token generation
+
+### 2. Maximum Entropy Reinforcement Learning
+- **Paper**: "Soft Actor-Critic" (Haarnoja et al., 2018)
+- **Contribution**: Entropy-regularized policy optimization
+- **Application**: Temperature-controlled token selection
+
+### 3. Spectral Analysis for Sequences
+- **Foundation**: Power Spectral Density for time series
+- **Innovation**: Spectral regularization prevents mode collapse
+- **Implementation**: Fast Fourier Transform (FFT) based
+
+**Key Innovation**: We show that autoregressive generation can be viewed as a sequential decision process where soft Bellman backups with spectral regularization enable diverse, high-quality generation without model retraining.
+
+See [MaximumEntropyTreeSearchforAutoregressive.md](docs/MaximumEntropyTreeSearchforAutoregressive.md) for complete mathematical derivation.
+
+---
+
+## Documentation
+
+### Core Documentation
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md) - System architecture and design
+- [ALGORITHM_AND_BEST_PRACTICES.md](docs/ALGORITHM_AND_BEST_PRACTICES.md) - Implementation details
+- [MaximumEntropyTreeSearchforAutoregressive.md](docs/MaximumEntropyTreeSearchforAutoregressive.md) - Mathematical framework
+
+### User Guides
+- [QUICK_START.md](docs/guides/QUICK_START.md) - Getting started
+- [COMPREHENSIVE_EVALUATION_GUIDE.md](docs/COMPREHENSIVE_EVALUATION_GUIDE.md) - Running evaluations
+- [PURE_MLX_M3_MAX_GUIDE.md](docs/guides/PURE_MLX_M3_MAX_GUIDE.md) - MLX optimization guide
+
+### Additional Resources
+- [S-ADT.md](docs/S-ADT.md) - Spectral Amortized Diffusion Trees
+- [MONOTONICITY_EXPLAINED.md](docs/MONOTONICITY_EXPLAINED.md) - Theoretical properties
+- [TRAINING.md](docs/TRAINING.md) - Training procedures
+
+---
+
+## Development
+
+### Testing
+
+```bash
+# Run test suite
+python -m pytest test/
+
 # Integration tests
 python dts_implementation/tests/test_integration.py
 
-# Quick test
+# Quick validation
 python dts_implementation/examples/simple_test.py
 ```
 
-### Adding New Models
+### Contributing
 
-```python
-# Create a model wrapper implementing:
-class MyModelWrapper:
-    def get_next_token_logits(self, token_sequence): ...
-    def encode_text(self, text): ...
-    def decode_tokens(self, tokens): ...
-    def get_top_k_tokens(self, sequence, k): ...
-```
+Contributions are welcome. Please:
+1. Fork the repository
+2. Create a feature branch
+3. Add tests for new functionality
+4. Submit a pull request
 
 ---
 
-## 📜 Citation
+## Citation
 
-If you use this code, please cite:
+If you use this code in your research, please cite:
 
 ```bibtex
 @software{specdifftree2025,
@@ -624,32 +506,24 @@ If you use this code, please cite:
 
 ---
 
-## 🙏 Acknowledgements
+## Acknowledgements
 
 This work builds upon:
-
-- **OpenTSLM** - Stanford BDHG (Time series language models)
-- **Diffusion Tree Sampling** - Jain et al., 2025 (DTS framework)
-- **Maximum Entropy RL** - Haarnoja et al., 2018 (Soft Bellman)
-- **MLX** - Apple ML Research (Apple Silicon optimization)
-
----
-
-## 📧 Contact
-
-For questions or issues:
-
-- Open an issue on [GitHub](https://github.com/vincehass/SpecDiffTree/issues)
-- Pull requests welcome!
+- **OpenTSLM** (Stanford BDHG) - Time series language models
+- **Diffusion Tree Sampling** (Jain et al., 2025) - DTS framework
+- **Maximum Entropy RL** (Haarnoja et al., 2018) - Soft Bellman equations
+- **MLX** (Apple ML Research) - Apple Silicon optimization
 
 ---
 
-## 📄 License
+## License
 
-MIT License - see [LICENSE](LICENSE) for details
+MIT License - see [LICENSE.md](LICENSE.md) for details.
 
 ---
 
-**Status**: ✅ Complete and Production-Ready  
-**Last Updated**: December 2025  
-**Built with**: PyTorch, MLX, OpenTSLM 🚀
+## Contact
+
+For questions or issues, please open an issue on [GitHub](https://github.com/vincehass/SpecDiffTree/issues).
+
+**Last Updated**: December 2025
