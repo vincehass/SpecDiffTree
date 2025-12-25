@@ -60,28 +60,32 @@ class SimplifiedMLXWrapper:
         model_path = snapshot_download(model_id)
         print(f"   ✅ Model path: {model_path}", flush=True)
         
-        # Determine base model for tokenizer
-        if "Llama" in model_id:
-            base_model_id = model_id.replace("mlx-community/", "meta-llama/").replace("-4bit", "")
-            if "Instruct" in base_model_id:
-                base_model_id = base_model_id.replace("-Instruct", "")
-        elif "Mistral" in model_id:
-            base_model_id = "mistralai/Mistral-7B-Instruct-v0.2"
-        else:
-            # For other models, try to load tokenizer from the MLX model itself
-            base_model_id = model_id
+        # Load tokenizer directly from the MLX model (avoids gated model issues!)
+        print(f"   Loading tokenizer from MLX model: {model_id}", flush=True)
+        print(f"   (MLX models include tokenizers, no need for base model mapping!)", flush=True)
         
-        print(f"   Loading tokenizer from: {base_model_id}", flush=True)
-        print(f"   (This may take a moment...)", flush=True)
-        
-        # Load with local files only to avoid re-downloading
+        # Try to load tokenizer from the MLX model first
         try:
-            self.tokenizer = AutoTokenizer.from_pretrained(base_model_id, local_files_only=True)
+            self.tokenizer = AutoTokenizer.from_pretrained(model_id, local_files_only=True)
             print(f"   ✅ Loaded from cache", flush=True)
-        except:
-            print(f"   Downloading tokenizer...", flush=True)
-            self.tokenizer = AutoTokenizer.from_pretrained(base_model_id)
-            print(f"   ✅ Downloaded", flush=True)
+        except Exception as e:
+            print(f"   Cache miss, downloading tokenizer from MLX model...", flush=True)
+            try:
+                self.tokenizer = AutoTokenizer.from_pretrained(model_id)
+                print(f"   ✅ Downloaded from MLX model", flush=True)
+            except Exception as e2:
+                print(f"   ⚠️  Failed to load from MLX model: {e2}", flush=True)
+                # Fallback: try alternative models
+                if "Llama-3.2-1B-Instruct" in model_id:
+                    fallback_model = "meta-llama/Llama-3.2-1B-Instruct"
+                elif "Llama-3.2-1B" in model_id:
+                    fallback_model = "meta-llama/Llama-3.2-1B"
+                else:
+                    raise RuntimeError(f"Cannot load tokenizer from {model_id} or fallback models")
+                
+                print(f"   Trying fallback: {fallback_model}", flush=True)
+                self.tokenizer = AutoTokenizer.from_pretrained(fallback_model)
+                print(f"   ✅ Loaded from fallback", flush=True)
         
         # Set pad token
         print(f"   Setting pad token...", flush=True)
@@ -135,6 +139,50 @@ class SimplifiedMLXWrapper:
             tokens = tokens[0]
         
         return self.tokenizer.decode(tokens, skip_special_tokens=True)
+    
+    def rollout_sequence(self, initial_tokens, max_new_tokens: int = 50, temperature: float = 1.0):
+        """
+        Generate a complete sequence using sampling (for MCTS/DTS rollouts)
+        
+        Args:
+            initial_tokens: Starting token sequence
+            max_new_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+            
+        Returns:
+            Complete token sequence
+        """
+        # Convert to list
+        if isinstance(initial_tokens, mx.array):
+            tokens = initial_tokens.tolist()
+        elif hasattr(initial_tokens, 'tolist'):
+            tokens = initial_tokens.tolist()
+        else:
+            tokens = list(initial_tokens)
+        
+        # Handle batch dimension
+        if isinstance(tokens[0], list):
+            tokens = tokens[0]
+        
+        # Generate tokens
+        for _ in range(max_new_tokens):
+            logits = self.get_next_token_logits(mx.array(tokens))
+            
+            # Apply temperature
+            if temperature != 1.0:
+                logits = logits / temperature
+            
+            # Sample
+            probs = mx.softmax(logits, axis=-1)
+            next_token = int(mx.random.categorical(mx.log(probs), num_samples=1).item())
+            
+            tokens.append(next_token)
+            
+            # Stop on EOS
+            if next_token == self.eos_token_id:
+                break
+        
+        return mx.array(tokens)
     
     def get_top_k_tokens(self, sequence, k: int = 4, temperature: float = 1.0):
         """Get top-k most probable next tokens

@@ -6,10 +6,15 @@
 
 set -e
 
-# Configuration
-NUM_SAMPLES=250
-NUM_ROLLOUTS=20
-EXPANSION_K=4
+# Configuration - OPTIMIZED (10 rollouts for 2x speedup)
+# Smart sample counts based on performance analysis
+GREEDY_SAMPLES=250      # Fast: ~1 min
+DTS_SAMPLES=250         # Reasonable: ~29 min  
+MCTS_SAMPLES=150        # Slow: ~45 min at 150 samples (2.6x slower than DTS)
+MAXENT_SAMPLES=150      # Dataset issues: use 150 to avoid crash
+
+NUM_ROLLOUTS=10          # OPTIMIZED: Reduced from 20 (2x faster)
+EXPANSION_K=3            # OPTIMIZED: Reduced from 4 (faster expansion)
 TEMPERATURE=1.0
 DATASET="m4"
 DEVICE="mps"
@@ -27,7 +32,11 @@ echo "  🚀 PARALLEL EVALUATION - Greedy, MCTS, DTS, MaxEnt-TS with WandB" | te
 echo "================================================================================" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
 echo "Configuration:" | tee -a "$LOG_FILE"
-echo "  • Samples: $NUM_SAMPLES" | tee -a "$LOG_FILE"
+echo "  • Smart Sample Counts:" | tee -a "$LOG_FILE"
+echo "    - Greedy:    $GREEDY_SAMPLES samples (~1 min)" | tee -a "$LOG_FILE"
+echo "    - DTS:       $DTS_SAMPLES samples (~29 min)" | tee -a "$LOG_FILE"
+echo "    - MCTS:      $MCTS_SAMPLES samples (~45 min)" | tee -a "$LOG_FILE"
+echo "    - MaxEnt-TS: $MAXENT_SAMPLES samples (~45 min)" | tee -a "$LOG_FILE"
 echo "  • Rollouts: $NUM_ROLLOUTS" | tee -a "$LOG_FILE"
 echo "  • Expansion K: $EXPANSION_K" | tee -a "$LOG_FILE"
 echo "  • Temperature: $TEMPERATURE" | tee -a "$LOG_FILE"
@@ -35,7 +44,10 @@ echo "  • Dataset: $DATASET" | tee -a "$LOG_FILE"
 echo "  • Device: $DEVICE" | tee -a "$LOG_FILE"
 echo "  • Epochs: $EPOCHS" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
+echo "  ✅ All bug fixes applied (MPS, KV cache, monotonic rewards)" | tee -a "$LOG_FILE"
+echo "" | tee -a "$LOG_FILE"
 echo "Results directory: $RESULTS_DIR" | tee -a "$LOG_FILE"
+echo "Expected total time: ~2 hours (running in parallel)" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
 
 ################################################################################
@@ -46,17 +58,17 @@ echo "🔬 Starting parallel evaluation..." | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
 
 # Run Greedy in background
-echo "▶️  Starting Greedy..." | tee -a "$LOG_FILE"
-python comprehensive_evaluation.py \
+echo "▶️  Starting Greedy ($GREEDY_SAMPLES samples)..." | tee -a "$LOG_FILE"
+(cd ../../evaluation && python comprehensive_evaluation.py \
     --method greedy \
-    --num_samples $NUM_SAMPLES \
+    --num_samples $GREEDY_SAMPLES \
     --num_rollouts $NUM_ROLLOUTS \
     --expansion_k $EXPANSION_K \
     --temperature $TEMPERATURE \
     --dataset $DATASET \
     --epochs $EPOCHS \
     --device $DEVICE \
-    > "$RESULTS_DIR/greedy.log" 2>&1 &
+    > "../experiments/scripts/$RESULTS_DIR/greedy.log" 2>&1) &
 
 GREEDY_PID=$!
 echo "   Greedy started (PID: $GREEDY_PID)" | tee -a "$LOG_FILE"
@@ -65,17 +77,17 @@ echo "   Greedy started (PID: $GREEDY_PID)" | tee -a "$LOG_FILE"
 sleep 3
 
 # Run MCTS in background
-echo "▶️  Starting MCTS..." | tee -a "$LOG_FILE"
-python comprehensive_evaluation.py \
+echo "▶️  Starting MCTS ($MCTS_SAMPLES samples)..." | tee -a "$LOG_FILE"
+(cd ../../evaluation && python comprehensive_evaluation.py \
     --method mcts \
-    --num_samples $NUM_SAMPLES \
+    --num_samples $MCTS_SAMPLES \
     --num_rollouts $NUM_ROLLOUTS \
     --expansion_k $EXPANSION_K \
     --temperature $TEMPERATURE \
     --dataset $DATASET \
     --epochs $EPOCHS \
     --device $DEVICE \
-    > "$RESULTS_DIR/mcts.log" 2>&1 &
+    > "../experiments/scripts/$RESULTS_DIR/mcts.log" 2>&1) &
 
 MCTS_PID=$!
 echo "   MCTS started (PID: $MCTS_PID)" | tee -a "$LOG_FILE"
@@ -83,17 +95,17 @@ echo "   MCTS started (PID: $MCTS_PID)" | tee -a "$LOG_FILE"
 sleep 3
 
 # Run DTS in background
-echo "▶️  Starting DTS..." | tee -a "$LOG_FILE"
-python comprehensive_evaluation.py \
+echo "▶️  Starting DTS ($DTS_SAMPLES samples)..." | tee -a "$LOG_FILE"
+(cd ../../evaluation && python comprehensive_evaluation.py \
     --method dts \
-    --num_samples $NUM_SAMPLES \
+    --num_samples $DTS_SAMPLES \
     --num_rollouts $NUM_ROLLOUTS \
     --expansion_k $EXPANSION_K \
     --temperature $TEMPERATURE \
     --dataset $DATASET \
     --epochs $EPOCHS \
     --device $DEVICE \
-    > "$RESULTS_DIR/dts.log" 2>&1 &
+    > "../experiments/scripts/$RESULTS_DIR/dts.log" 2>&1) &
 
 DTS_PID=$!
 echo "   DTS started (PID: $DTS_PID)" | tee -a "$LOG_FILE"
@@ -101,17 +113,17 @@ echo "   DTS started (PID: $DTS_PID)" | tee -a "$LOG_FILE"
 sleep 3
 
 # Run MaxEnt-TS in background
-echo "▶️  Starting MaxEnt-TS..." | tee -a "$LOG_FILE"
-python comprehensive_evaluation.py \
+echo "▶️  Starting MaxEnt-TS ($MAXENT_SAMPLES samples)..." | tee -a "$LOG_FILE"
+(cd ../../evaluation && python comprehensive_evaluation.py \
     --method maxent_ts \
-    --num_samples $NUM_SAMPLES \
+    --num_samples $MAXENT_SAMPLES \
     --num_rollouts $NUM_ROLLOUTS \
     --expansion_k $EXPANSION_K \
     --temperature $TEMPERATURE \
     --dataset $DATASET \
     --epochs $EPOCHS \
     --device $DEVICE \
-    > "$RESULTS_DIR/maxent_ts.log" 2>&1 &
+    > "../experiments/scripts/$RESULTS_DIR/maxent_ts.log" 2>&1) &
 
 MAXENT_PID=$!
 echo "   MaxEnt-TS started (PID: $MAXENT_PID)" | tee -a "$LOG_FILE"

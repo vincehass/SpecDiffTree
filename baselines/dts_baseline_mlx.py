@@ -1,14 +1,15 @@
 """
-DTS (Diffusion Tree Sampling) Baseline
+Pure MLX DTS (Diffusion Tree Sampling) Baseline
 
 Implements the exact algorithm from the paper:
 "Diffusion Tree Sampling: Inference-Time Alignment of Generative Diffusion Models"
 Jain et al., 2025 (arXiv:2506.20701)
 
 Adapted for autoregressive LLMs (token sequences instead of diffusion states)
+Pure MLX implementation - no PyTorch dependencies!
 """
 
-import torch
+import mlx.core as mx
 import numpy as np
 import time
 from typing import List, Optional, Dict
@@ -33,8 +34,8 @@ class DTSNode:
     Represents a partial sequence x_{≤t}
     """
     
-    def __init__(self, token_ids: torch.Tensor, parent: Optional['DTSNode'] = None):
-        self.token_ids = token_ids
+    def __init__(self, token_ids: mx.array, parent: Optional['DTSNode'] = None):
+        self.token_ids = token_ids  # MLX array
         self.parent = parent
         self.children: List['DTSNode'] = []
         
@@ -48,7 +49,7 @@ class DTSNode:
 
 class DTSTextGenerator:
     """
-    Diffusion Tree Sampling (DTS) for text generation
+    Pure MLX Diffusion Tree Sampling (DTS) for text generation
     
     Algorithm from paper (Alg. 1):
     
@@ -70,36 +71,33 @@ class DTSTextGenerator:
         self.config = config
         self.root: Optional[DTSNode] = None
         
-    def search(self, prompt_tokens: torch.Tensor, max_new_tokens: int = 200) -> Dict:
+    def search(self, prompt_tokens: mx.array, max_new_tokens: int = 200) -> Dict:
         """
         Run DTS search
         
         Args:
-            prompt_tokens: Initial prompt
+            prompt_tokens: Initial prompt (MLX array)
             max_new_tokens: Maximum tokens to generate
             
         Returns:
             Dict with best sequence and statistics
         """
-        # Convert to tensor if needed
-        if isinstance(prompt_tokens, list):
-            prompt_tokens = torch.tensor(prompt_tokens, dtype=torch.long)
-        elif not isinstance(prompt_tokens, torch.Tensor):
-            prompt_tokens = torch.tensor(list(prompt_tokens), dtype=torch.long)
-        
-        # Ensure correct dtype
-        if prompt_tokens.dtype != torch.long:
-            prompt_tokens = prompt_tokens.long()
+        # Convert to MLX array if needed
+        if not isinstance(prompt_tokens, mx.array):
+            if hasattr(prompt_tokens, 'tolist'):
+                prompt_tokens = mx.array(prompt_tokens.tolist())
+            else:
+                prompt_tokens = mx.array(list(prompt_tokens))
         
         # Initialize root - handle batch dimension
-        if prompt_tokens.dim() == 2:
+        if prompt_tokens.ndim == 2:
             prompt_tokens = prompt_tokens[0]
         
         self.root = DTSNode(prompt_tokens)
         start_time = time.time()
         
         if self.config.verbose:
-            print(f"\n🌲 DTS: Starting {self.config.num_rollouts} rollouts...")
+            print(f"\n🌲 DTS (Pure MLX): Starting {self.config.num_rollouts} rollouts...")
         
         # Run rollouts
         for rollout_idx in range(self.config.num_rollouts):
@@ -116,7 +114,7 @@ class DTSTextGenerator:
             final_tokens, rollout_node = self._rollout(expanded, max_new_tokens)
             
             # 4. EVALUATE: Get reward
-            reward = self.reward_fn(final_tokens.unsqueeze(0))
+            reward = self.reward_fn(mx.expand_dims(final_tokens, 0))
             
             # 5. BACKUP: Soft Bellman update
             if self.config.use_soft_bellman:
@@ -141,7 +139,7 @@ class DTSTextGenerator:
             print(f"\n✅ DTS complete. Best V̂: {current.soft_value:.4f}")
         
         # Decode best sequence
-        best_text = self.model.tokenizer.decode(current.token_ids, skip_special_tokens=True)
+        best_text = self.model.tokenizer.decode(current.token_ids.tolist(), skip_special_tokens=True)
         
         return {
             'best_node': current,
@@ -177,11 +175,11 @@ class DTSTextGenerator:
                 log_probs.append(log_prob)
             
             # Softmax to get probabilities
-            log_probs = torch.tensor(log_probs)
-            probs = torch.softmax(log_probs, dim=0)
+            log_probs = mx.array(log_probs)
+            probs = mx.softmax(log_probs, axis=0)
 
-            # Sample child (move to CPU for .item() to avoid MPS conversion error)
-            child_idx = torch.multinomial(probs, num_samples=1).cpu().item()
+            # Sample child using categorical distribution
+            child_idx = int(mx.random.categorical(mx.log(probs)))
             current = children[child_idx]
         
         return current
@@ -190,29 +188,23 @@ class DTSTextGenerator:
         """
         Expansion: Add new children based on top-k tokens from p_θ
         """
-        # Ensure node tokens are in correct format
-        if isinstance(node.token_ids, list):
-            node.token_ids = torch.tensor(node.token_ids, dtype=torch.long)
-        elif node.token_ids.dtype != torch.long:
-            node.token_ids = node.token_ids.long()
-        
         # Get top-k next tokens
-        with torch.no_grad():
-            input_ids = node.token_ids.unsqueeze(0)
-            logits_output = self.model.get_next_token_logits(input_ids)
-            # Handle KV cache: get_next_token_logits may return (logits, past_kv) or just logits
-            logits = logits_output[0] if isinstance(logits_output, tuple) else logits_output
-            top_tokens, top_probs = torch.topk(
-                torch.softmax(logits, dim=-1),
-                k=self.config.expansion_k
-            )
+        input_ids = mx.expand_dims(node.token_ids, 0) if node.token_ids.ndim == 1 else node.token_ids
+        logits_output = self.model.get_next_token_logits(input_ids)
         
-        # Create children with correct dtype
-        for token_id in top_tokens.squeeze(0).tolist():
-            new_tokens = torch.cat([
-                node.token_ids,
-                torch.tensor([token_id], dtype=torch.long, device=node.token_ids.device)
-            ])
+        # Handle KV cache: get_next_token_logits may return (logits, past_kv) or just logits
+        logits = logits_output[0] if isinstance(logits_output, tuple) else logits_output
+        
+        # Get probabilities
+        probs = mx.softmax(logits, axis=-1)
+        
+        # Get top-k using argsort (MLX doesn't have topk, but argsort works)
+        top_indices = mx.argsort(probs, axis=-1)[-self.config.expansion_k:]
+        top_indices = top_indices[::-1]  # Reverse to get highest first
+        
+        # Create children
+        for token_id in top_indices.tolist():
+            new_tokens = mx.concatenate([node.token_ids, mx.array([token_id])])
             child = DTSNode(new_tokens, parent=node)
             node.children.append(child)
         
@@ -223,27 +215,22 @@ class DTSTextGenerator:
         """
         Rollout: Complete sequence using base model p_θ
         """
-        current_tokens = node.token_ids.unsqueeze(0)
-        remaining = max_new_tokens - (current_tokens.shape[1] - self.root.token_ids.shape[0])
+        current_tokens = mx.expand_dims(node.token_ids, 0) if node.token_ids.ndim == 1 else node.token_ids
+        remaining = max_new_tokens - (current_tokens.shape[1] if current_tokens.ndim == 2 else current_tokens.shape[0]) + self.root.token_ids.shape[0]
         
         if remaining <= 0:
             return node.token_ids, node
         
         # Generate completion
-        with torch.no_grad():
-            final_tokens = self.model.rollout_sequence(
-                current_tokens,
-                max_new_tokens=remaining,
-                temperature=self.config.temperature
-            )
-        
-        # Convert list to tensor if needed
-        if isinstance(final_tokens, list):
-            final_tokens = torch.tensor(final_tokens, dtype=torch.long, device=node.token_ids.device)
+        final_tokens = self.model.rollout_sequence(
+            current_tokens,
+            max_new_tokens=remaining,
+            temperature=self.config.temperature
+        )
         
         # Handle batch dimension
         if final_tokens.ndim == 2:
-            final_tokens = final_tokens.squeeze(0)
+            final_tokens = final_tokens[0]
         
         return final_tokens, node
     
@@ -267,10 +254,10 @@ class DTSTextGenerator:
             if current.children:
                 # Soft max over children values
                 child_values = [c.soft_value for c in current.children]
-                child_values_tensor = torch.tensor(child_values)
-                soft_max = (1.0 / self.config.temperature) * torch.logsumexp(
-                    self.config.temperature * child_values_tensor, dim=0
-                ).cpu().item()  # Move to CPU before .item() to avoid MPS conversion error
+                child_values_array = mx.array(child_values)
+                soft_max = (1.0 / self.config.temperature) * float(
+                    mx.logsumexp(self.config.temperature * child_values_array, axis=0)
+                )
                 target = reward + soft_max
             else:
                 # Terminal or leaf node
@@ -340,4 +327,3 @@ class DTSStarTextGenerator(DTSTextGenerator):
             )
         
         return current
-

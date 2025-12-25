@@ -1,11 +1,13 @@
 """
-Standard MCTS Baseline for Text Generation
+Pure MLX MCTS Baseline for Text Generation
 
 Classic Monte Carlo Tree Search with UCT (Upper Confidence Bound for Trees)
 Reference: Browne et al., "A Survey of Monte Carlo Tree Search Methods" (2012)
+
+Pure MLX implementation - no PyTorch dependencies!
 """
 
-import torch
+import mlx.core as mx
 import numpy as np
 import time
 from typing import List, Optional, Dict
@@ -26,8 +28,8 @@ class MCTSConfig:
 class MCTSNode:
     """Node in MCTS tree for text generation"""
     
-    def __init__(self, token_ids: torch.Tensor, parent: Optional['MCTSNode'] = None):
-        self.token_ids = token_ids  # Sequence up to this node
+    def __init__(self, token_ids: mx.array, parent: Optional['MCTSNode'] = None):
+        self.token_ids = token_ids  # Sequence up to this node (MLX array)
         self.parent = parent
         self.children: List['MCTSNode'] = []
         self.visit_count = 0
@@ -64,7 +66,7 @@ class MCTSNode:
 
 class MCTSTextGenerator:
     """
-    Standard MCTS for text generation
+    Pure MLX MCTS for text generation
     
     Algorithm:
     1. Selection: Use UCT to select path to leaf
@@ -79,36 +81,33 @@ class MCTSTextGenerator:
         self.config = config
         self.root: Optional[MCTSNode] = None
         
-    def search(self, prompt_tokens: torch.Tensor, max_new_tokens: int = 200) -> Dict:
+    def search(self, prompt_tokens: mx.array, max_new_tokens: int = 200) -> Dict:
         """
         Run MCTS search
         
         Args:
-            prompt_tokens: Initial prompt [batch_size, seq_len] or [seq_len]
+            prompt_tokens: Initial prompt [batch_size, seq_len] or [seq_len] (MLX array)
             max_new_tokens: Maximum tokens to generate
             
         Returns:
             Dict with best sequence and statistics
         """
-        # Convert to tensor if needed
-        if isinstance(prompt_tokens, list):
-            prompt_tokens = torch.tensor(prompt_tokens, dtype=torch.long)
-        elif not isinstance(prompt_tokens, torch.Tensor):
-            prompt_tokens = torch.tensor(list(prompt_tokens), dtype=torch.long)
-        
-        # Ensure correct dtype
-        if prompt_tokens.dtype != torch.long:
-            prompt_tokens = prompt_tokens.long()
+        # Convert to MLX array if needed
+        if not isinstance(prompt_tokens, mx.array):
+            if hasattr(prompt_tokens, 'tolist'):
+                prompt_tokens = mx.array(prompt_tokens.tolist())
+            else:
+                prompt_tokens = mx.array(list(prompt_tokens))
         
         # Initialize root - handle batch dimension
-        if prompt_tokens.dim() == 2:
+        if prompt_tokens.ndim == 2:
             prompt_tokens = prompt_tokens[0]
         
         self.root = MCTSNode(prompt_tokens)
         start_time = time.time()
         
         if self.config.verbose:
-            print(f"\n🌳 MCTS: Starting {self.config.num_simulations} simulations...")
+            print(f"\n🌳 MCTS (Pure MLX): Starting {self.config.num_simulations} simulations...")
         
         # Run simulations
         for sim in range(self.config.num_simulations):
@@ -137,7 +136,7 @@ class MCTSTextGenerator:
             print(f"\n✅ MCTS complete. Best Q-value: {best_node.get_q_value():.4f}")
         
         # Decode best sequence
-        best_text = self.model.tokenizer.decode(best_sequence, skip_special_tokens=True)
+        best_text = self.model.tokenizer.decode(best_sequence.tolist(), skip_special_tokens=True)
         
         return {
             'best_node': best_node,
@@ -172,34 +171,29 @@ class MCTSTextGenerator:
         """
         Expansion phase: Add new child node
         """
-        # Ensure node tokens are in correct format
-        if isinstance(node.token_ids, list):
-            node.token_ids = torch.tensor(node.token_ids, dtype=torch.long)
-        elif node.token_ids.dtype != torch.long:
-            node.token_ids = node.token_ids.long()
-        
         # Get top-k tokens from model
         if len(node.untried_actions) == 0:
             # First expansion - get top-k tokens
-            with torch.no_grad():
-                input_ids = node.token_ids.unsqueeze(0)
-                logits_output = self.model.get_next_token_logits(input_ids)
-                # Handle KV cache: get_next_token_logits may return (logits, past_kv) or just logits
-                logits = logits_output[0] if isinstance(logits_output, tuple) else logits_output
-                top_tokens, top_probs = torch.topk(
-                    torch.softmax(logits, dim=-1),
-                    k=self.config.expansion_k
-                )
-                node.untried_actions = top_tokens.squeeze(0).tolist()
+            input_ids = mx.expand_dims(node.token_ids, 0) if node.token_ids.ndim == 1 else node.token_ids
+            logits_output = self.model.get_next_token_logits(input_ids)
+            
+            # Handle KV cache: get_next_token_logits may return (logits, past_kv) or just logits
+            logits = logits_output[0] if isinstance(logits_output, tuple) else logits_output
+            
+            # Get probabilities
+            probs = mx.softmax(logits, axis=-1)
+            
+            # Get top-k using argsort (MLX doesn't have topk, but argsort works)
+            top_indices = mx.argsort(probs, axis=-1)[-self.config.expansion_k:]
+            top_indices = top_indices[::-1]  # Reverse to get highest first
+            
+            node.untried_actions = top_indices.tolist()
         
         # Pick an untried action
         action = node.untried_actions.pop(0)
         
-        # Create child node with correct dtype
-        new_tokens = torch.cat([
-            node.token_ids, 
-            torch.tensor([action], dtype=torch.long, device=node.token_ids.device)
-        ])
+        # Create child node - concatenate tokens
+        new_tokens = mx.concatenate([node.token_ids, mx.array([action])])
         child = MCTSNode(new_tokens, parent=node)
         node.children.append(child)
         
@@ -210,20 +204,19 @@ class MCTSTextGenerator:
         Simulation phase: Rollout to terminal state and evaluate
         """
         # Complete sequence using model's generate
-        current_tokens = node.token_ids.unsqueeze(0)
-        remaining = max_new_tokens - (current_tokens.shape[1] - self.root.token_ids.shape[0])
+        current_tokens = mx.expand_dims(node.token_ids, 0) if node.token_ids.ndim == 1 else node.token_ids
+        remaining = max_new_tokens - (current_tokens.shape[1] if current_tokens.ndim == 2 else current_tokens.shape[0]) + self.root.token_ids.shape[0]
         
         if remaining <= 0:
             # Already at max length
             final_tokens = current_tokens
         else:
             # Rollout
-            with torch.no_grad():
-                final_tokens = self.model.rollout_sequence(
-                    current_tokens,
-                    max_new_tokens=remaining,
-                    temperature=self.config.temperature
-                )
+            final_tokens = self.model.rollout_sequence(
+                current_tokens,
+                max_new_tokens=remaining,
+                temperature=self.config.temperature
+            )
         
         # Evaluate reward
         reward = self.reward_fn(final_tokens)
@@ -258,4 +251,3 @@ class MCTSTextGenerator:
         for child in node.children:
             count += self._count_nodes(child)
         return count
-

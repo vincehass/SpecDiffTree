@@ -5,6 +5,9 @@ __pycache__/
 *.pyo
 *.pyd
 .Python
+*.egg-info/
+dist/
+build/
 
 # Virtual Environments (HEAVY - DO NOT COMMIT)
 opentslm_env/
@@ -12,6 +15,7 @@ specdifftree_env/
 venv/
 env/
 ENV/
+.venv/
 
 # Model files (HEAVY - DO NOT COMMIT)
 *.safetensors
@@ -20,6 +24,7 @@ ENV/
 *.ckpt
 *.bin
 checkpoints/
+checkpoints_mlx/
 checkpoints_pretrained/
 mlx_training/checkpoints/
 
@@ -36,16 +41,29 @@ results/
 raw_data/
 data/raw/
 data/processed/
+data/M4TimeSeriesCaptionDataset/
+data/har_cot/
+evaluation/data/
 *.npy
 *.npz
 *.h5
 *.hdf5
+*.pkl
+*.pickle
+*.csv
+
+# macOS metadata
+__MACOSX/
+**/__MACOSX/
 
 # Wandb & Logs (HEAVY)
 wandb/
 .wandb/
 *.log
 *.pid
+
+# JAX temporary training artifacts
+jax_training/
 
 # Documentation - Plans, Guides, Status (Session-specific)
 docs/plans/*_PLAN.md
@@ -77,12 +95,32 @@ docs/guides/RUN_*.md
 # macOS
 .DS_Store
 **/.DS_Store
+.AppleDouble
+.LSOverride
 
 # IDE
 .vscode/
 .idea/
 *.swp
+*.swo
+*~
 
 # Environment
 .env
+.env.local
+
+# External repos (reference only)
 dts_paper_repo/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Temporary experiment logs
+experiments/logs/
+experiments/comparison_results.json
+
+# Evaluation temporary files
+evaluation/wandb/
+evaluation/results/
+evaluation/*.log

@@ -193,6 +193,7 @@ python evaluation/comprehensive_evaluation_mlx.py --method maxent_ts --num_sampl
 ```
 
 **Benefits:**
+
 - ⚡ **2-5x faster** than PyTorch/MPS on M3 Max
 - 🧠 **33% less memory** usage
 - 🎯 **Native Apple Silicon** optimization

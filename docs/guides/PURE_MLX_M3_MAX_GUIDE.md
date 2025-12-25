@@ -10,11 +10,11 @@ This guide covers the **pure MLX implementation** of the evaluation framework, s
 
 ### Performance Advantages
 
-| Framework | M3 Max Performance | Notes |
-|-----------|-------------------|-------|
-| **Pure MLX** | ⭐⭐⭐⭐⭐ | **2-5x faster!** Native Apple Silicon |
-| PyTorch/MPS | ⭐⭐⭐ | Good, but overhead from PyTorch |
-| PyTorch/CPU | ⭐ | Slow, not optimized |
+| Framework    | M3 Max Performance | Notes                                 |
+| ------------ | ------------------ | ------------------------------------- |
+| **Pure MLX** | ⭐⭐⭐⭐⭐         | **2-5x faster!** Native Apple Silicon |
+| PyTorch/MPS  | ⭐⭐⭐             | Good, but overhead from PyTorch       |
+| PyTorch/CPU  | ⭐                 | Slow, not optimized                   |
 
 ### Key Benefits
 
@@ -75,10 +75,12 @@ python evaluation/comprehensive_evaluation_mlx.py \
 ```
 
 **This runs:**
+
 - Greedy (pure MLX)
 - MaxEnt-TS (pure MLX)
 
 **Why not MCTS/DTS?**
+
 - MCTS and DTS baselines are currently implemented in PyTorch
 - Working on pure MLX versions for complete MLX pipeline
 - For now, use separate script for those methods
@@ -126,14 +128,15 @@ python evaluation/comprehensive_evaluation_mlx.py \
 
 ### M3 Max Benchmarks
 
-| Method | Framework | Time/Sample | Speedup |
-|--------|-----------|-------------|---------|
-| Greedy | Pure MLX | 3.2s | **5.2x** |
-| Greedy | PyTorch/MPS | 16.5s | 1x baseline |
-| MaxEnt-TS | Pure MLX | 45s | **2.4x** |
-| MaxEnt-TS | PyTorch/MPS | 108s | 1x baseline |
+| Method    | Framework   | Time/Sample | Speedup     |
+| --------- | ----------- | ----------- | ----------- |
+| Greedy    | Pure MLX    | 3.2s        | **5.2x**    |
+| Greedy    | PyTorch/MPS | 16.5s       | 1x baseline |
+| MaxEnt-TS | Pure MLX    | 45s         | **2.4x**    |
+| MaxEnt-TS | PyTorch/MPS | 108s        | 1x baseline |
 
 **Test Setup:**
+
 - M3 Max (16-core GPU)
 - 64GB Unified Memory
 - Llama 3.2 1B Instruct
@@ -141,10 +144,10 @@ python evaluation/comprehensive_evaluation_mlx.py \
 
 ### Memory Usage
 
-| Framework | Peak Memory | Average Memory |
-|-----------|-------------|----------------|
-| **Pure MLX** | 12 GB | 8 GB |
-| PyTorch/MPS | 18 GB | 14 GB |
+| Framework    | Peak Memory | Average Memory |
+| ------------ | ----------- | -------------- |
+| **Pure MLX** | 12 GB       | 8 GB           |
+| PyTorch/MPS  | 18 GB       | 14 GB          |
 
 Pure MLX is 33% more memory efficient!
 
@@ -163,7 +166,7 @@ class MLXComprehensiveEvaluator:
     def __init__(self, ...):
         # Load pure MLX model
         self.model = SimplifiedMLXWrapper(model_id)
-        
+
         # MLX-based inference
         def _run_greedy_mlx(self, prompt_tokens):
             tokens = list(prompt_tokens.tolist())
@@ -172,7 +175,7 @@ class MLXComprehensiveEvaluator:
                 next_token = int(mx.argmax(logits).item())
                 tokens.append(next_token)
             return tokens
-        
+
         # MLX-based perplexity
         def _compute_perplexity_mlx(self, ...):
             tokens_mx = mx.array(generated_tokens)
@@ -183,13 +186,13 @@ class MLXComprehensiveEvaluator:
 
 ### Key Differences from PyTorch Version
 
-| Feature | PyTorch/MPS | Pure MLX |
-|---------|-------------|----------|
+| Feature       | PyTorch/MPS            | Pure MLX        |
+| ------------- | ---------------------- | --------------- |
 | Model Loading | `AutoModelForCausalLM` | `mlx_lm.load()` |
-| Tensor Type | `torch.Tensor` | `mx.array` |
-| Device | `"mps"` | Automatic |
-| Gradients | PyTorch autograd | MLX autograd |
-| Memory | PyTorch allocator | Unified memory |
+| Tensor Type   | `torch.Tensor`         | `mx.array`      |
+| Device        | `"mps"`                | Automatic       |
+| Gradients     | PyTorch autograd       | MLX autograd    |
+| Memory        | PyTorch allocator      | Unified memory  |
 
 ---
 
@@ -198,11 +201,13 @@ class MLXComprehensiveEvaluator:
 ### Currently Supported (Pure MLX)
 
 ✅ **Greedy Decoding**
+
 - Fastest method
 - Pure MLX implementation
 - 5x speedup on M3 Max
 
 ✅ **MaxEnt-TS**
+
 - Core algorithm
 - Pure MLX implementation
 - 2.4x speedup on M3 Max
@@ -210,16 +215,19 @@ class MLXComprehensiveEvaluator:
 ### In Development (MLX Ports)
 
 🚧 **MCTS** - Monte Carlo Tree Search
+
 - Currently PyTorch-based
 - MLX port in progress
 
 🚧 **DTS** - Diffusion Tree Sampling
+
 - Currently PyTorch-based
 - MLX port in progress
 
 ### Why Not All Methods Yet?
 
 The baselines (MCTS, DTS) were originally implemented with PyTorch tensors. Converting them to pure MLX requires:
+
 - Replacing all `torch.Tensor` operations with `mx.array`
 - Updating tensor manipulation code
 - Testing for correctness
@@ -269,11 +277,13 @@ time python evaluation/comprehensive_evaluation.py \
 ### Expected Results (M3 Max)
 
 **Greedy Decoding (10 samples):**
+
 - Pure MLX: ~32 seconds
 - PyTorch/MPS: ~165 seconds
 - **Speedup: 5.2x** 🚀
 
 **MaxEnt-TS (10 samples, 20 rollouts):**
+
 - Pure MLX: ~7.5 minutes
 - PyTorch/MPS: ~18 minutes
 - **Speedup: 2.4x** 🚀
@@ -330,6 +340,7 @@ system_profiler SPDisplaysDataType | grep "Metal"
 ### Performance Goals
 
 Target speedups for full MLX pipeline:
+
 - Greedy: **5-6x** (achieved: 5.2x) ✅
 - MCTS: **2-3x** (in progress)
 - DTS: **2-3x** (in progress)
@@ -340,11 +351,13 @@ Target speedups for full MLX pipeline:
 ## 📚 References
 
 ### MLX Documentation
+
 - [MLX GitHub](https://github.com/ml-explore/mlx)
 - [MLX Examples](https://github.com/ml-explore/mlx-examples)
 - [MLX LM](https://github.com/ml-explore/mlx-examples/tree/main/llms)
 
 ### Model Zoo
+
 - [MLX Community Models](https://huggingface.co/mlx-community)
 - [Pre-converted Models](https://huggingface.co/models?library=mlx)
 
@@ -417,6 +430,7 @@ Results directory: results/parallel_mlx_20251215_103045
 ## ✅ Summary
 
 **Pure MLX for M3 Max:**
+
 - ✅ 2-5x faster than PyTorch/MPS
 - ✅ 33% less memory usage
 - ✅ Native Apple Silicon optimization
@@ -424,16 +438,20 @@ Results directory: results/parallel_mlx_20251215_103045
 - ✅ Production-ready
 
 **Perfect for:**
+
 - M3 Max users
 - Large-scale experiments
 - Production deployments
 - Apple Silicon optimization
 
 **Trade-off:**
+
 - Currently only Greedy + MaxEnt-TS
 - MCTS/DTS coming soon in pure MLX
 
 ---
 
 **Ready to get 5x speedup on M3 Max? Use Pure MLX! 🚀**
+
+
 

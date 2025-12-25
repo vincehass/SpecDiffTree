@@ -18,9 +18,10 @@ from typing import Dict, List, Optional
 from collections import defaultdict
 import argparse
 
-# Add paths
-sys.path.insert(0, os.path.abspath('.'))
-sys.path.insert(0, os.path.abspath('baselines'))
+# Add paths - ensure we can import from root
+root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, root_dir)
+sys.path.insert(0, os.path.join(root_dir, 'baselines'))
 
 # Import methods
 from dts_implementation.models.pytorch_hf_wrapper import PyTorchHFWrapper
@@ -98,8 +99,20 @@ class ComprehensiveEvaluator:
         self.use_wandb = use_wandb
         self.device = device
         
+        # Method colors for W&B visualization
+        method_colors = {
+            "greedy": "#95E1D3",      # Mint (baseline)
+            "mcts": "#FF6B6B",        # Red (standard MCTS)
+            "dts": "#4ECDC4",         # Teal (DTS with Soft Bellman)
+            "maxent_ts": "#AA96DA"    # Purple (our optimized method)
+        }
+        
         # Initialize WandB
         if self.use_wandb:
+            tags = [method_name, f"k{expansion_k}", f"roll{num_rollouts}", dataset_name]
+            if method_name in method_colors:
+                tags.append(f"color:{method_colors[method_name]}")
+            
             wandb.init(
                 project="specdifftree-comprehensive",
                 name=f"{method_name}_k{expansion_k}_roll{num_rollouts}_temp{temperature}",
@@ -110,8 +123,11 @@ class ComprehensiveEvaluator:
                     "expansion_k": expansion_k,
                     "temperature": temperature,
                     "dataset": dataset_name,
-                    "device": device
-                }
+                    "device": device,
+                    "color": method_colors.get(method_name, "#888888"),
+                    "optimizations": ["KV cache", "Early stopping", "Monotonic rewards"] if method_name == "maxent_ts" else []
+                },
+                tags=tags
             )
         
         # Load model
@@ -162,8 +178,9 @@ class ComprehensiveEvaluator:
                     shift_logits.view(-1, shift_logits.size(-1)),
                     shift_labels.view(-1)
                 )
-                
-                perplexity = torch.exp(loss).item()
+
+                # Move to CPU before .item() to avoid MPS conversion error
+                perplexity = torch.exp(loss).cpu().item()
                 return perplexity
         except Exception as e:
             print(f"   ⚠️ Perplexity computation failed: {e}")
@@ -329,11 +346,15 @@ class ComprehensiveEvaluator:
         return dts_star.search(prompt_tokens[0], max_new_tokens=50)
     
     def _run_maxent_ts(self, prompt_tokens: torch.Tensor) -> Dict:
-        """Run MaxEnt-TS"""
+        """Run MaxEnt-TS with OPTIMIZED config"""
         config = MaxEntTSConfig(
             num_rollouts=self.num_rollouts,
             expansion_k=self.expansion_k,
             temperature=self.temperature,
+            max_seq_length=100,
+            rollout_max_new_tokens=50,  # NEW: Limit rollout tokens
+            use_kv_cache=True,          # NEW: Enable KV cache (O(n) complexity)
+            early_stopping=True,        # NEW: Stop on EOS token
             verbose=False
         )
         maxent = MaxEntTS(self.model, self.reward_fn, config)

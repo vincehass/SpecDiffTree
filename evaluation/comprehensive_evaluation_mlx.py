@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.abspath('baselines'))
 
 # Import MLX-specific modules
 from dts_implementation.models.mlx_direct_loader import SimplifiedMLXWrapper
-from dts_implementation.search.maxent_ts import MaxEntTS, MaxEntTSConfig
+from dts_implementation.search.maxent_ts_mlx import MaxEntTS, MaxEntTSConfig
 from dts_implementation.rewards.spectral_reward import SpectralReward
 
 # Import datasets
@@ -127,8 +127,121 @@ class MLXComprehensiveEvaluator:
         print(f"Model: {model_id}")
         print()
         
-        self.model = SimplifiedMLXWrapper(model_id=model_id)
+        # Load model using mlx-lm (works with safetensors format)
+        import mlx.core as mx
+        from mlx_lm import load
         
+        try:
+            print(f"   Loading model with mlx-lm...", flush=True)
+            mlx_model, mlx_tokenizer = load(model_id)
+            print(f"   ✅ Model loaded successfully!", flush=True)
+            
+            # 7. Wrap in pure MLX interface (no conversions!)
+            class MLXModelWrapper:
+                """Pure MLX wrapper - all operations use MLX arrays"""
+                def __init__(self, model, tokenizer):
+                    self.model = model
+                    self.tokenizer = tokenizer
+                    self.eos_token_id = tokenizer.eos_token_id
+                
+                def get_next_token_logits(self, token_sequence):
+                    """Returns MLX array (pure MLX!)"""
+                    # Ensure it's an MLX array
+                    if not isinstance(token_sequence, mx.array):
+                        if hasattr(token_sequence, 'tolist'):
+                            token_sequence = mx.array(token_sequence.tolist())
+                        else:
+                            token_sequence = mx.array(token_sequence)
+                    
+                    # Ensure batch dimension
+                    if token_sequence.ndim == 1:
+                        token_sequence = mx.expand_dims(token_sequence, 0)
+                    
+                    # Get logits from MLX model
+                    logits = self.model(token_sequence)
+                    
+                    # Return last token logits (MLX array)
+                    return logits[0, -1, :]
+                
+                def decode_sequence(self, tokens):
+                    """Decode tokens to text"""
+                    if isinstance(tokens, mx.array):
+                        tokens = tokens.tolist()
+                    elif hasattr(tokens, 'tolist'):
+                        tokens = tokens.tolist()
+                    
+                    if isinstance(tokens, list) and len(tokens) > 0 and isinstance(tokens[0], list):
+                        tokens = tokens[0]
+                    
+                    return self.tokenizer.decode(tokens)
+                
+                def get_top_k_tokens(self, token_sequence, k: int = 5, past_kv=None):
+                    """Get top-k tokens and their probabilities (for MaxEnt-TS)"""
+                    # Ensure it's an MLX array
+                    if not isinstance(token_sequence, mx.array):
+                        if hasattr(token_sequence, 'tolist'):
+                            token_sequence = mx.array(token_sequence.tolist())
+                        else:
+                            token_sequence = mx.array(token_sequence)
+                    
+                    # Ensure batch dimension
+                    if token_sequence.ndim == 1:
+                        token_sequence = mx.expand_dims(token_sequence, 0)
+                    
+                    # Get logits from MLX model
+                    logits = self.model(token_sequence)
+                    logits_1d = logits[0, -1, :]
+                    
+                    # Get probabilities
+                    probs = mx.softmax(logits_1d, axis=-1)
+                    
+                    # Get top-k using argsort (MLX doesn't have topk)
+                    top_indices = mx.argsort(probs, axis=-1)[-k:]
+                    top_indices = top_indices[::-1]  # Reverse to get highest first
+                    
+                    # Get corresponding probabilities
+                    top_probs = probs[top_indices]
+                    
+                    # Return as MLX arrays (MaxEnt-TS expects tensors, but MLX works)
+                    return top_indices, top_probs
+                
+                def rollout_sequence(self, initial_tokens, max_new_tokens: int = 50, **kwargs):
+                    """Returns MLX array (pure MLX!)"""
+                    # Convert to MLX array if needed
+                    if not isinstance(initial_tokens, mx.array):
+                        if hasattr(initial_tokens, 'tolist'):
+                            initial_tokens = mx.array(initial_tokens.tolist())
+                        else:
+                            initial_tokens = mx.array(initial_tokens)
+                    
+                    # Handle batch dimension
+                    if initial_tokens.ndim == 2:
+                        tokens = initial_tokens[0].tolist()
+                    else:
+                        tokens = initial_tokens.tolist()
+                    
+                    # Generate using MLX
+                    for _ in range(max_new_tokens):
+                        logits = self.get_next_token_logits(mx.array(tokens))
+                        next_token = int(mx.argmax(logits))
+                        tokens.append(next_token)
+                        
+                        if next_token == self.eos_token_id:
+                            break
+                    
+                    # Return as MLX array
+                    return mx.array(tokens)
+            
+            self.model = MLXModelWrapper(mlx_model, mlx_tokenizer)
+            print(f"   ✅ Model wrapper initialized", flush=True)
+            print(f"   EOS token ID: {self.model.eos_token_id}", flush=True)
+            
+        except Exception as e:
+            print(f"❌ Failed to load model: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            raise
+
         print(f"✅ Model loaded\n")
         
         # Initialize reward function
@@ -142,26 +255,24 @@ class MLXComprehensiveEvaluator:
     
     def _load_dataset(self):
         """Load time series dataset"""
-        print(f"📊 Loading {self.dataset_name} dataset...")
+        print(f"📊 Loading {self.dataset_name} dataset...", flush=True)
         
         EOS_TOKEN = self.model.tokenizer.eos_token
         
         if self.dataset_name == "m4":
             self.dataset = M4QADataset(
-                data_path="data",
                 EOS_TOKEN=EOS_TOKEN,
                 split="test"
             )
         elif self.dataset_name == "har":
             self.dataset = HARCoTQADataset(
-                data_path="data/har_cot",
                 EOS_TOKEN=EOS_TOKEN,
                 split="test"
             )
         else:
             raise ValueError(f"Unknown dataset: {self.dataset_name}")
         
-        print(f"✅ Dataset loaded: {len(self.dataset)} samples\n")
+        print(f"✅ Dataset loaded: {len(self.dataset)} samples\n", flush=True)
     
     def evaluate_sample(self, sample: Dict, sample_idx: int, epoch: int) -> EvaluationMetrics:
         """Evaluate single sample"""
@@ -185,6 +296,10 @@ class MLXComprehensiveEvaluator:
             # Run method
             if self.method_name == "greedy":
                 result = self._run_greedy_mlx(prompt_tokens)
+            elif self.method_name == "mcts":
+                result = self._run_mcts_mlx(prompt_tokens)
+            elif self.method_name == "dts":
+                result = self._run_dts_mlx(prompt_tokens)
             elif self.method_name == "maxent_ts":
                 result = self._run_maxent_ts_mlx(prompt_tokens)
             else:
@@ -264,6 +379,63 @@ class MLXComprehensiveEvaluator:
             'avg_branching': 0.0
         }
     
+    def _run_mcts_mlx(self, prompt_tokens) -> Dict:
+        """Run MCTS with pure MLX"""
+        # Import pure MLX MCTS baseline
+        import sys
+        sys.path.insert(0, 'baselines')
+        from mcts_baseline_mlx import MCTSTextGenerator, MCTSConfig
+        
+        config = MCTSConfig(
+            num_simulations=self.num_rollouts,
+            expansion_k=self.expansion_k,
+            temperature=self.temperature,
+            max_seq_length=512,
+            verbose=False
+        )
+        
+        # Use MLX array directly - no conversions!
+        mcts = MCTSTextGenerator(self.model, self.reward_fn, config)
+        result = mcts.search(prompt_tokens, max_new_tokens=50)
+        
+        return {
+            'text': result.get('best_text', ''),
+            'tokens': result.get('best_sequence', []),
+            'reward': result.get('best_reward', 0.0),
+            'nfe': result.get('nodes_explored', 0),
+            'tree_depth': 0,
+            'avg_branching': 0.0
+        }
+    
+    def _run_dts_mlx(self, prompt_tokens) -> Dict:
+        """Run DTS with pure MLX"""
+        # Import pure MLX DTS baseline
+        import sys
+        sys.path.insert(0, 'baselines')
+        from dts_baseline_mlx import DTSTextGenerator, DTSConfig
+        
+        config = DTSConfig(
+            num_rollouts=self.num_rollouts,
+            expansion_k=self.expansion_k,
+            temperature=self.temperature,
+            max_seq_length=512,
+            use_soft_bellman=True,
+            verbose=False
+        )
+        
+        # Use MLX array directly - no conversions!
+        dts = DTSTextGenerator(self.model, self.reward_fn, config)
+        result = dts.search(prompt_tokens, max_new_tokens=50)
+        
+        return {
+            'text': result.get('best_text', ''),
+            'tokens': result.get('best_sequence', []),
+            'reward': result.get('best_value', 0.0),
+            'nfe': result.get('nodes_explored', 0),
+            'tree_depth': 0,
+            'avg_branching': 0.0
+        }
+    
     def _run_maxent_ts_mlx(self, prompt_tokens) -> Dict:
         """Run MaxEnt-TS with pure MLX"""
         config = MaxEntTSConfig(
@@ -277,7 +449,15 @@ class MLXComprehensiveEvaluator:
         maxent = MaxEntTS(self.model, self.reward_fn, config)
         result = maxent.search(prompt_tokens, max_new_tokens=50)
         
-        return result
+        # Format result for evaluation metrics
+        return {
+            'text': result.get('best_text', ''),
+            'tokens': result.get('best_sequence', prompt_tokens).tolist(),
+            'reward': result.get('best_value', 0.0),
+            'nfe': result.get('nodes_explored', 0),
+            'tree_depth': 0,
+            'avg_branching': 0.0
+        }
     
     def _compute_perplexity_mlx(self, prompt_tokens, generated_tokens) -> float:
         """Compute perplexity using MLX"""
@@ -372,17 +552,18 @@ class MLXComprehensiveEvaluator:
     
     def run_evaluation(self, epochs: int = 3):
         """Run full evaluation across epochs"""
-        print(f"\n{'='*80}")
-        print(f"  🔬 STARTING EVALUATION")
-        print(f"{'='*80}\n")
-        print(f"Method: {self.method_name}")
-        print(f"Samples: {self.num_samples}")
-        print(f"Epochs: {epochs}")
-        print(f"Framework: Pure MLX")
-        print()
+        print(f"\n{'='*80}", flush=True)
+        print(f"  🔬 STARTING EVALUATION", flush=True)
+        print(f"{'='*80}\n", flush=True)
+        print(f"Method: {self.method_name}", flush=True)
+        print(f"Samples: {self.num_samples}", flush=True)
+        print(f"Epochs: {epochs}", flush=True)
+        print(f"Framework: Pure MLX", flush=True)
+        print(flush=True)
         
+        print(f"🔍 About to enter epoch loop (epochs={epochs})...", flush=True)
         for epoch in range(1, epochs + 1):
-            print(f"\n📊 Epoch {epoch}/{epochs}")
+            print(f"\n📊 Epoch {epoch}/{epochs}", flush=True)
             print(f"{'='*60}\n")
             
             epoch_metrics = []
@@ -488,8 +669,8 @@ class MLXComprehensiveEvaluator:
 
 def main():
     parser = argparse.ArgumentParser(description="Pure MLX Comprehensive Evaluation (M3 Max Optimized)")
-    parser.add_argument("--method", type=str, required=True, choices=["greedy", "maxent_ts"],
-                       help="Evaluation method (MLX supports: greedy, maxent_ts)")
+    parser.add_argument("--method", type=str, required=True, choices=["greedy", "mcts", "dts", "maxent_ts"],
+                       help="Evaluation method (ALL 4 methods work with MLX!)")
     parser.add_argument("--num_samples", type=int, default=250,
                        help="Number of samples to evaluate")
     parser.add_argument("--num_rollouts", type=int, default=20,

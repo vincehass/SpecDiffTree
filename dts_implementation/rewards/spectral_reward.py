@@ -83,7 +83,8 @@ class SpectralReward:
         
         elif torch.is_tensor(tokens_or_text):
             # PyTorch tensor - could be tokens or time series
-            arr = tokens_or_text.cpu().numpy() if tokens_or_text.is_cuda or str(tokens_or_text.device) == 'mps' else tokens_or_text.numpy()
+            # Check if tensor is on GPU/MPS - use device.type for reliable check
+            arr = tokens_or_text.cpu().numpy() if tokens_or_text.is_cuda or tokens_or_text.device.type == 'mps' else tokens_or_text.numpy()
             
             # If it's a small tensor, treat as tokens
             if arr.size < 10:
